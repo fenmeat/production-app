@@ -139,6 +139,7 @@ body {
 	letter-spacing: 0.4px;
 }
 .product-header.actuals-mode { grid-template-columns: 1fr 70px 80px; }
+.product-header.plan-mode { grid-template-columns: 1fr 64px 64px 70px; }
 
 .product-row {
 	display: grid;
@@ -150,6 +151,7 @@ body {
 	border-bottom: 1px solid var(--border);
 }
 .product-row.actuals-mode { grid-template-columns: 1fr 70px 80px; }
+.product-row.plan-mode { grid-template-columns: 1fr 64px 64px 70px; }
 .product-row:nth-child(even) { background: #fafafa; }
 
 .product-name { font-size: 14px; font-weight: 600; }
@@ -171,6 +173,13 @@ body {
 	border-radius: 6px;
 }
 .qty-input:focus { outline: none; border-color: var(--copper); }
+
+.produce-qty {
+	text-align: center;
+	font-size: 18px;
+	font-weight: 700;
+	color: var(--copper);
+}
 
 .empty-state {
 	text-align: center;
@@ -263,7 +272,7 @@ const state = {
 	mode: 'plan', // 'plan' or 'actuals'
 	routes: [],
 	period: '',
-	products: [] // {code, name, plannedQty, actualQty}
+	products: [] // {code, name, plannedQty, actualQty, stockQty}
 };
 
 function todayStr() {
@@ -324,16 +333,36 @@ async function loadPlanForDate() {
 		state.routes = data.routes || [];
 		state.period = data.period || 'NORMAL';
 		state.products = (data.products || []).map(p => ({
-			code: p.code, name: p.name, plannedQty: p.qty, actualQty: p.qty
+			code: p.code, name: p.name, plannedQty: p.qty, actualQty: p.qty, stockQty: 0
 		}));
 
-		// Pull any already-saved actuals for this date and merge them in
+		// Pull current stock levels and any already-saved actuals for this date
+		await loadStockLevels();
 		await loadActualsForDate();
 
 		updateContextBar();
 		render();
 	} catch (e) {
 		showToast('⚠️ Network error', 'error');
+	}
+}
+
+async function loadStockLevels() {
+	try {
+		const url = `${SCRIPT_URL}?action=getStockLevels&sheetId=${NEW_SHEET_ID}`;
+		const resp = await fetch(url);
+		const data = await resp.json();
+		if (data.status === 'ok') {
+			const stockByCode = {};
+			(data.products || []).forEach(p => { stockByCode[p.code] = p.qty; });
+			state.products.forEach(p => {
+				if (stockByCode[p.code] !== undefined) {
+					p.stockQty = stockByCode[p.code];
+				}
+			});
+		}
+	} catch (e) {
+		// Non-fatal — plan still shows, stock just defaults to 0
 	}
 }
 
@@ -386,37 +415,96 @@ function render() {
 }
 
 function renderPlan() {
-	const totalBags = state.products.reduce((s, p) => s + p.plannedQty, 0);
+	const totalForecast = state.products.reduce((s, p) => s + p.plannedQty, 0);
+	const totalStock = state.products.reduce((s, p) => s + (p.stockQty || 0), 0);
+	const totalProduce = state.products.reduce((s, p) => s + produceQty(p), 0);
 
 	const html = `
 		<div class="summary-bar no-print">
 			<div class="summary-item">
-				<div class="summary-val">${state.products.length}</div>
-				<div class="summary-label">Items</div>
+				<div class="summary-val">${totalForecast}</div>
+				<div class="summary-label">Forecast</div>
 			</div>
 			<div class="summary-item">
-				<div class="summary-val">${totalBags}</div>
-				<div class="summary-label">Total Bags</div>
+				<div class="summary-val">${totalStock}</div>
+				<div class="summary-label">In Stock</div>
+			</div>
+			<div class="summary-item">
+				<div class="summary-val" id="totalProduceVal">${totalProduce}</div>
+				<div class="summary-label">To Produce</div>
 			</div>
 		</div>
-		<div class="product-header">
+		<div class="product-header plan-mode">
 			<div>PRODUCT</div>
-			<div style="text-align:center">PLAN</div>
+			<div style="text-align:center">FORECAST</div>
+			<div style="text-align:center">STOCK</div>
+			<div style="text-align:center">PRODUCE</div>
 		</div>
-		${state.products.map(p => `
-			<div class="product-row">
+		${state.products.map((p, i) => `
+			<div class="product-row plan-mode">
 				<div>
 					<div class="product-name">${p.name}</div>
 					<div class="product-code">${p.code}</div>
 				</div>
 				<div class="plan-qty">${p.plannedQty}</div>
+				<div>
+					<input type="number" class="qty-input"
+						id="stock_${i}" value="${p.stockQty || 0}" min="0"
+						oninput="updateStock(${i}, this.value)"
+						onfocus="this.select()">
+				</div>
+				<div class="produce-qty" id="produce_${i}">${produceQty(p)}</div>
 			</div>
 		`).join('')}
 		<div class="action-bar no-print">
 			<button class="btn btn-print" onclick="window.print()">🖨️ Print</button>
+			<button class="btn btn-save" onclick="saveStockLevels()">💾 Save Stock</button>
 		</div>
 	`;
 	document.getElementById('mainContent').innerHTML = html;
+}
+
+function produceQty(p) {
+	return Math.max(0, p.plannedQty - (p.stockQty || 0));
+}
+
+function updateStock(idx, val) {
+	state.products[idx].stockQty = parseInt(val) || 0;
+	const produceEl = document.getElementById(`produce_${idx}`);
+	if (produceEl) produceEl.textContent = produceQty(state.products[idx]);
+
+	const totalStock = state.products.reduce((s, p) => s + (p.stockQty || 0), 0);
+	const totalProduce = state.products.reduce((s, p) => s + produceQty(p), 0);
+	const totalStockEl = document.querySelectorAll('.summary-val')[1];
+	if (totalStockEl) totalStockEl.textContent = totalStock;
+	const totalProduceEl = document.getElementById('totalProduceVal');
+	if (totalProduceEl) totalProduceEl.textContent = totalProduce;
+}
+
+async function saveStockLevels() {
+	showToast('💾 Saving stock...', '');
+
+	const rows = state.products.map(p => ({ code: p.code, qty: p.stockQty || 0 }));
+
+	try {
+		const resp = await fetch(SCRIPT_URL, {
+			method: 'POST',
+			headers: {'Content-Type': 'text/plain'},
+			body: JSON.stringify({
+				action: 'updateStockLevels',
+				sheetId: NEW_SHEET_ID,
+				rows: rows
+			})
+		});
+		const data = await resp.json();
+		if (data.status === 'ok') {
+			showToast(`✅ Stock levels saved`, 'success');
+		} else {
+			showToast('⚠️ ' + (data.message || 'Save failed'), 'error');
+		}
+	} catch (e) {
+		showToast('⚠️ Network error — try again', 'error');
+	}
 }
 
 function renderActuals() {
