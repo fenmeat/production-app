@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>FenMeat Production</title>
+<style>
+:root {
+	--red: #C0392B;
+	--dark: #1a1a1a;
+	--mid: #2d2d2d;
+	--card: #f9f9f9;
+	--border: #e0e0e0;
+	--green: #27AE60;
+	--orange: #E67E22;
+	--blue: #2980B9;
+	--copper: #A0522D;
+	--copper-dark: #7a3d20;
+	--text: #222;
+	--muted: #777;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+	background: #f0f0f0;
+	color: var(--text);
+	-webkit-tap-highlight-color: transparent;
+}
+
+.header {
+	background: var(--dark);
+	color: white;
+	padding: 14px 16px;
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+}
+.header h1 { font-size: 18px; font-weight: 700; letter-spacing: 0.3px; }
+.header .logo { color: var(--copper); }
+.header-right { font-size: 12px; color: #aaa; text-align: right; }
+
+.date-bar {
+	background: white;
+	padding: 12px 16px;
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	border-bottom: 1px solid var(--border);
+}
+.date-bar label { font-size: 14px; font-weight: 600; }
+.date-bar input[type="date"] {
+	flex: 1;
+	padding: 10px;
+	font-size: 16px;
+	border: 1px solid var(--border);
+	border-radius: 6px;
+}
+
+.mode-bar {
+	display: flex;
+	background: var(--mid);
+}
+.mode-btn {
+	flex: 1;
+	padding: 14px 8px;
+	border: none;
+	background: var(--mid);
+	color: #ccc;
+	font-size: 14px;
+	font-weight: 700;
+	cursor: pointer;
+}
+.mode-btn.active.plan { background: var(--blue); color: white; }
+.mode-btn.active.actuals { background: var(--copper); color: white; }
+
+.context-bar {
+	background: #FFF6EE;
+	border-bottom: 1px solid var(--border);
+	padding: 10px 16px;
+	font-size: 13px;
+	color: var(--copper-dark);
+}
+.context-bar .routes { font-weight: 700; }
+.context-bar .period {
+	display: inline-block;
+	margin-left: 8px;
+	padding: 2px 8px;
+	border-radius: 10px;
+	background: var(--copper);
+	color: white;
+	font-size: 11px;
+	font-weight: 700;
+}
+
+.content { padding-bottom: 90px; }
+
+.loading {
+	text-align: center;
+	padding: 60px 20px;
+	color: var(--muted);
+}
+.spinner {
+	width: 28px; height: 28px;
+	border: 3px solid var(--border);
+	border-top-color: var(--copper);
+	border-radius: 50%;
+	margin: 0 auto 12px;
+	animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.summary-bar {
+	background: white;
+	display: flex;
+	border-bottom: 1px solid var(--border);
+}
+.summary-item {
+	flex: 1;
+	text-align: center;
+	padding: 14px 8px;
+	border-right: 1px solid var(--border);
+}
+.summary-item:last-child { border-right: none; }
+.summary-val { font-size: 22px; font-weight: 700; }
+.summary-label { font-size: 11px; color: var(--muted); margin-top: 2px; text-transform: uppercase; letter-spacing: 0.4px; }
+
+.product-header {
+	display: grid;
+	grid-template-columns: 1fr 80px;
+	gap: 8px;
+	padding: 8px 16px;
+	background: #ececec;
+	font-size: 11px;
+	font-weight: 700;
+	color: var(--muted);
+	text-transform: uppercase;
+	letter-spacing: 0.4px;
+}
+.product-header.actuals-mode { grid-template-columns: 1fr 70px 80px; }
+
+.product-row {
+	display: grid;
+	grid-template-columns: 1fr 80px;
+	gap: 8px;
+	align-items: center;
+	padding: 12px 16px;
+	background: white;
+	border-bottom: 1px solid var(--border);
+}
+.product-row.actuals-mode { grid-template-columns: 1fr 70px 80px; }
+.product-row:nth-child(even) { background: #fafafa; }
+
+.product-name { font-size: 14px; font-weight: 600; }
+.product-code { font-size: 11px; color: var(--muted); margin-top: 1px; }
+
+.plan-qty {
+	text-align: center;
+	font-size: 18px;
+	font-weight: 700;
+	color: var(--blue);
+}
+
+.qty-input {
+	width: 100%;
+	padding: 8px 4px;
+	font-size: 16px;
+	text-align: center;
+	border: 1px solid var(--border);
+	border-radius: 6px;
+}
+.qty-input:focus { outline: none; border-color: var(--copper); }
+
+.empty-state {
+	text-align: center;
+	padding: 60px 24px;
+	color: var(--muted);
+}
+.empty-state .big { font-size: 32px; margin-bottom: 8px; }
+
+.action-bar {
+	position: fixed;
+	bottom: 0; left: 0; right: 0;
+	background: white;
+	border-top: 1px solid var(--border);
+	padding: 12px 16px;
+	display: flex;
+	gap: 10px;
+}
+.btn {
+	flex: 1;
+	padding: 14px;
+	border: none;
+	border-radius: 8px;
+	font-size: 15px;
+	font-weight: 700;
+	cursor: pointer;
+}
+.btn-print { background: var(--mid); color: white; }
+.btn-save { background: var(--copper); color: white; }
+.btn-save:disabled { background: #ccc; cursor: not-allowed; }
+
+.toast {
+	position: fixed;
+	top: 16px; left: 50%;
+	transform: translateX(-50%);
+	background: var(--dark);
+	color: white;
+	padding: 12px 20px;
+	border-radius: 8px;
+	font-size: 14px;
+	font-weight: 600;
+	z-index: 999;
+	opacity: 0;
+	transition: opacity 0.25s;
+	pointer-events: none;
+	max-width: 90%;
+	text-align: center;
+}
+.toast.show { opacity: 1; }
+.toast.success { background: var(--green); }
+.toast.error { background: var(--red); }
+
+@media print {
+	.no-print { display: none !important; }
+	body { background: white; }
+}
+</style>
+</head>
+<body>
+
+<div class="header no-print">
+	<h1><span class="logo">FEN</span>MEAT Production</h1>
+	<div class="header-right" id="connectionStatus">⚪ Connecting...</div>
+</div>
+
+<div class="date-bar no-print">
+	<label>📅 Date:</label>
+	<input type="date" id="dateInput" onchange="onDateChange()">
+</div>
+
+<div class="mode-bar no-print">
+	<button class="mode-btn plan active" id="btnPlan" onclick="setMode('plan')">📋 PLAN</button>
+	<button class="mode-btn actuals" id="btnActuals" onclick="setMode('actuals')">✅ LOG ACTUALS</button>
+</div>
+
+<div class="context-bar no-print" id="contextBar" style="display:none"></div>
+
+<div class="content" id="mainContent">
+	<div class="loading">
+		<div class="spinner"></div>
+		Select a date to begin
+	</div>
+</div>
+
+<script>
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzOvHW0qLnNQUP_kgImFdAXNcU7SMDsA6vYOFfeyyuBrs7j4MOrtWBgvoMv8Wba_A1yYw/exec';
+const NEW_SHEET_ID = '1UzTdOY9_Ade5bQ4FsQz5_gMgQNmiWWEwIYDoRUKPpak';
+
+const state = {
+	date: '',
+	mode: 'plan', // 'plan' or 'actuals'
+	routes: [],
+	period: '',
+	products: [] // {code, name, plannedQty, actualQty}
+};
+
+function todayStr() {
+	const d = new Date();
+	const tz = d.getTimezoneOffset() * 60000;
+	return new Date(d - tz).toISOString().split('T')[0];
+}
+
+window.onload = function() {
+	const dateInput = document.getElementById('dateInput');
+	dateInput.value = todayStr();
+	state.date = dateInput.value;
+	testConnection();
+	loadPlanForDate();
+};
+
+async function testConnection() {
+	const statusEl = document.getElementById('connectionStatus');
+	try {
+		const url = `${SCRIPT_URL}?action=ping&sheetId=${NEW_SHEET_ID}`;
+		const resp = await fetch(url);
+		const data = await resp.json();
+		statusEl.textContent = data.status === 'ok' ? '🟢 Connected' : '🔴 Error';
+	} catch (e) {
+		statusEl.textContent = '🔴 Offline';
+	}
+}
+
+function onDateChange() {
+	state.date = document.getElementById('dateInput').value;
+	loadPlanForDate();
+}
+
+function setMode(mode) {
+	state.mode = mode;
+	document.getElementById('btnPlan').classList.toggle('active', mode === 'plan');
+	document.getElementById('btnActuals').classList.toggle('active', mode === 'actuals');
+	render();
+}
+
+async function loadPlanForDate() {
+	if (!state.date) return;
+	document.getElementById('mainContent').innerHTML = `
+		<div class="loading"><div class="spinner"></div>Loading production plan...</div>
+	`;
+	document.getElementById('contextBar').style.display = 'none';
+
+	try {
+		const url = `${SCRIPT_URL}?action=getProductionPlan&date=${state.date}&sheetId=${NEW_SHEET_ID}`;
+		const resp = await fetch(url);
+		const data = await resp.json();
+
+		if (data.status !== 'ok') {
+			showToast('⚠️ Could not load plan', 'error');
+			return;
+		}
+
+		state.routes = data.routes || [];
+		state.period = data.period || 'NORMAL';
+		state.products = (data.products || []).map(p => ({
+			code: p.code, name: p.name, plannedQty: p.qty, actualQty: p.qty
+		}));
+
+		// Pull any already-saved actuals for this date and merge them in
+		await loadActualsForDate();
+
+		updateContextBar();
+		render();
+	} catch (e) {
+		showToast('⚠️ Network error', 'error');
+	}
+}
+
+async function loadActualsForDate() {
+	try {
+		const url = `${SCRIPT_URL}?action=getProductionLog&date=${state.date}&sheetId=${NEW_SHEET_ID}`;
+		const resp = await fetch(url);
+		const data = await resp.json();
+		if (data.status === 'ok' && data.found) {
+			const savedByCode = {};
+			data.products.forEach(p => { savedByCode[p.code] = p.actualQty; });
+			state.products.forEach(p => {
+				if (savedByCode[p.code] !== undefined) {
+					p.actualQty = savedByCode[p.code];
+				}
+			});
+		}
+	} catch (e) {
+		// Non-fatal — plan still shows, actuals just won't be pre-filled
+	}
+}
+
+function updateContextBar() {
+	const bar = document.getElementById('contextBar');
+	if (state.routes.length === 0) {
+		bar.style.display = 'block';
+		bar.innerHTML = `No routes scheduled for this date.`;
+		return;
+	}
+	bar.style.display = 'block';
+	bar.innerHTML = `Routes: <span class="routes">${state.routes.join(', ')}</span><span class="period">${state.period.replace('_', ' ')}</span>`;
+}
+
+function render() {
+	if (state.products.length === 0) {
+		document.getElementById('mainContent').innerHTML = `
+			<div class="empty-state">
+				<div class="big">📭</div>
+				No production needed for this date.
+			</div>
+		`;
+		return;
+	}
+
+	if (state.mode === 'plan') {
+		renderPlan();
+	} else {
+		renderActuals();
+	}
+}
+
+function renderPlan() {
+	const totalBags = state.products.reduce((s, p) => s + p.plannedQty, 0);
+
+	const html = `
+		<div class="summary-bar no-print">
+			<div class="summary-item">
+				<div class="summary-val">${state.products.length}</div>
+				<div class="summary-label">Items</div>
+			</div>
+			<div class="summary-item">
+				<div class="summary-val">${totalBags}</div>
+				<div class="summary-label">Total Bags</div>
+			</div>
+		</div>
+		<div class="product-header">
+			<div>PRODUCT</div>
+			<div style="text-align:center">PLAN</div>
+		</div>
+		${state.products.map(p => `
+			<div class="product-row">
+				<div>
+					<div class="product-name">${p.name}</div>
+					<div class="product-code">${p.code}</div>
+				</div>
+				<div class="plan-qty">${p.plannedQty}</div>
+			</div>
+		`).join('')}
+		<div class="action-bar no-print">
+			<button class="btn btn-print" onclick="window.print()">🖨️ Print</button>
+		</div>
+	`;
+	document.getElementById('mainContent').innerHTML = html;
+}
+
+function renderActuals() {
+	const totalPlanned = state.products.reduce((s, p) => s + p.plannedQty, 0);
+	const totalActual = state.products.reduce((s, p) => s + (p.actualQty || 0), 0);
+
+	const html = `
+		<div class="summary-bar no-print">
+			<div class="summary-item">
+				<div class="summary-val">${totalPlanned}</div>
+				<div class="summary-label">Planned</div>
+			</div>
+			<div class="summary-item">
+				<div class="summary-val" id="totalActualVal">${totalActual}</div>
+				<div class="summary-label">Actual</div>
+			</div>
+		</div>
+		<div class="product-header actuals-mode">
+			<div>PRODUCT</div>
+			<div style="text-align:center">PLAN</div>
+			<div style="text-align:center">ACTUAL</div>
+		</div>
+		${state.products.map((p, i) => `
+			<div class="product-row actuals-mode">
+				<div>
+					<div class="product-name">${p.name}</div>
+					<div class="product-code">${p.code}</div>
+				</div>
+				<div class="plan-qty">${p.plannedQty}</div>
+				<div>
+					<input type="number" class="qty-input"
+						id="actual_${i}" value="${p.actualQty}" min="0"
+						oninput="updateActual(${i}, this.value)"
+						onfocus="this.select()">
+				</div>
+			</div>
+		`).join('')}
+		<div class="action-bar no-print">
+			<button class="btn btn-save" onclick="saveActuals()">💾 Save Actuals</button>
+		</div>
+	`;
+	document.getElementById('mainContent').innerHTML = html;
+}
+
+function updateActual(idx, val) {
+	state.products[idx].actualQty = parseInt(val) || 0;
+	const total = state.products.reduce((s, p) => s + (p.actualQty || 0), 0);
+	const totalEl = document.getElementById('totalActualVal');
+	if (totalEl) totalEl.textContent = total;
+}
+
+async function saveActuals() {
+	if (!confirm(`Save actual production for ${state.date}?\n\n${state.products.length} items.`)) return;
+
+	showToast('💾 Saving...', '');
+
+	const rows = state.products.map(p => ({
+		code: p.code,
+		name: p.name,
+		plannedQty: p.plannedQty,
+		actualQty: p.actualQty || 0
+	}));
+
+	try {
+		const resp = await fetch(SCRIPT_URL, {
+			method: 'POST',
+			headers: {'Content-Type': 'text/plain'},
+			body: JSON.stringify({
+				action: 'writeProductionLog',
+				sheetId: NEW_SHEET_ID,
+				date: state.date,
+				rows: rows
+			})
+		});
+		const data = await resp.json();
+		if (data.status === 'ok') {
+			showToast(`✅ Saved ${data.saved} items`, 'success');
+		} else {
+			showToast('⚠️ ' + (data.message || 'Save failed'), 'error');
+		}
+	} catch (e) {
+		showToast('⚠️ Network error — try again', 'error');
+	}
+}
+
+function showToast(msg, type) {
+	let toast = document.getElementById('toast');
+	if (!toast) {
+		toast = document.createElement('div');
+		toast.id = 'toast';
+		toast.className = 'toast';
+		document.body.appendChild(toast);
+	}
+	toast.textContent = msg;
+	toast.className = 'toast show' + (type ? ' ' + type : '');
+	setTimeout(() => { toast.className = 'toast'; }, 2200);
+}
+</script>
+
+</body>
+</html>
