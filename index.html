@@ -195,6 +195,64 @@ body {
 }
 .empty-state .big { font-size: 32px; margin-bottom: 8px; }
 
+.trolley-card {
+	background: #FFF6EE;
+	border: 1px solid var(--copper);
+	border-radius: 8px;
+	margin: 12px 16px;
+	padding: 14px 16px;
+}
+.trolley-title {
+	font-size: 13px;
+	font-weight: 700;
+	color: var(--copper-dark);
+	margin-bottom: 10px;
+}
+.trolley-row {
+	display: flex;
+	justify-content: space-between;
+	font-size: 13px;
+	padding: 3px 0;
+	color: var(--text);
+}
+.trolley-row b { color: var(--copper-dark); }
+.trolley-split {
+	display: flex;
+	gap: 8px;
+	margin-top: 10px;
+}
+.trolley-split > div {
+	flex: 1;
+	background: white;
+	border-radius: 6px;
+	padding: 8px 4px;
+	text-align: center;
+}
+.trolley-split span {
+	display: block;
+	font-size: 11px;
+	color: var(--muted);
+	font-weight: 700;
+}
+.trolley-split b {
+	display: block;
+	font-size: 18px;
+	color: var(--copper-dark);
+}
+.trolley-leftover {
+	margin-top: 10px;
+	font-size: 12px;
+	color: var(--muted);
+	font-style: italic;
+}
+
+.stock-na {
+	text-align: center;
+	font-size: 12px;
+	color: var(--muted);
+	font-style: italic;
+}
+
 .action-bar {
 	position: fixed;
 	bottom: 0; left: 0; right: 0;
@@ -274,12 +332,17 @@ body {
 const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzOvHW0qLnNQUP_kgImFdAXNcU7SMDsA6vYOFfeyyuBrs7j4MOrtWBgvoMv8Wba_A1yYw/exec';
 const NEW_SHEET_ID = '1UzTdOY9_Ade5bQ4FsQz5_gMgQNmiWWEwIYDoRUKPpak';
 
+const RUSSIAN_PER_BAG = { R01: 60, R02: 50, R03: 40, R04: 30 };
+const RUSSIAN_BATCH_YIELD = 1310;
+const RUSSIAN_CODES = ['R01', 'R02', 'R03', 'R04'];
+
 const state = {
 	date: '',
 	mode: 'plan', // 'plan' or 'actuals'
 	routes: [],
 	period: '',
-	products: [] // {code, name, plannedQty, actualQty, stockQty}
+	products: [], // {code, name, plannedQty, actualQty, stockQty}
+	russianTrolley: null // {totalLoose, batchesNeeded, looseAvailable, suggestedBags, leftoverLoose}
 };
 
 function todayStr() {
@@ -347,6 +410,8 @@ async function loadPlanForDate() {
 		await loadStockLevels();
 		await loadBagsPerBatch();
 		await loadActualsForDate();
+
+		state.russianTrolley = calcRussiansTrolley(state.products);
 
 		updateContextBar();
 		render();
@@ -443,10 +508,28 @@ function render() {
 
 function renderPlan() {
 	const totalForecast = state.products.reduce((s, p) => s + p.plannedQty, 0);
-	const totalStock = state.products.reduce((s, p) => s + (p.stockQty || 0), 0);
+	const totalStock = state.products.reduce((s, p) => s + (RUSSIAN_CODES.includes(p.code) ? 0 : (p.stockQty || 0)), 0);
 	const totalProduce = state.products.reduce((s, p) => s + produceQty(p), 0);
 
+	const rt = state.russianTrolley;
+	const trolleyCard = (rt && rt.totalLoose > 0) ? `
+		<div class="trolley-card no-print">
+			<div class="trolley-title">🌭 Russians Trolley — R6/R5/R4/R3 pooled batches</div>
+			<div class="trolley-row"><span>Loose Russians needed</span><b>${rt.totalLoose.toLocaleString()}</b></div>
+			<div class="trolley-row"><span>Batches required (1 batch = ${RUSSIAN_BATCH_YIELD.toLocaleString()})</span><b>${rt.batchesNeeded}</b></div>
+			<div class="trolley-row"><span>Loose Russians available</span><b>${rt.looseAvailable.toLocaleString()}</b></div>
+			<div class="trolley-split">
+				<div><span>R6</span><b>${rt.suggestedBags.R01}</b></div>
+				<div><span>R5</span><b>${rt.suggestedBags.R02}</b></div>
+				<div><span>R4</span><b>${rt.suggestedBags.R03}</b></div>
+				<div><span>R3</span><b>${rt.suggestedBags.R04}</b></div>
+			</div>
+			${rt.leftoverLoose > 0 ? `<div class="trolley-leftover">Leftover loose: ${rt.leftoverLoose} (pack as Jumbo Russian or carry over)</div>` : ''}
+		</div>
+	` : '';
+
 	const html = `
+		${trolleyCard}
 		<div class="summary-bar no-print">
 			<div class="summary-item">
 				<div class="summary-val">${totalForecast}</div>
@@ -467,7 +550,9 @@ function renderPlan() {
 			<div style="text-align:center">STOCK</div>
 			<div style="text-align:center">PRODUCE</div>
 		</div>
-		${state.products.map((p, i) => `
+		${state.products.map((p, i) => {
+			const isRussian = RUSSIAN_CODES.includes(p.code);
+			return `
 			<div class="product-row plan-mode">
 				<div>
 					<div class="product-name">${p.name}</div>
@@ -475,23 +560,60 @@ function renderPlan() {
 				</div>
 				<div class="plan-qty">${p.plannedQty}</div>
 				<div>
-					<input type="number" class="qty-input"
-						id="stock_${i}" value="${p.stockQty || 0}" min="0"
-						oninput="updateStock(${i}, this.value)"
-						onfocus="this.select()">
+					${isRussian
+						? `<div class="stock-na">pooled</div>`
+						: `<input type="number" class="qty-input"
+							id="stock_${i}" value="${p.stockQty || 0}" min="0"
+							oninput="updateStock(${i}, this.value)"
+							onfocus="this.select()">`
+					}
 				</div>
 				<div>
 					<div class="produce-qty" id="produce_${i}">${produceQty(p)}</div>
 					<div class="produce-batches" id="batches_${i}">${batchLabel(p)}</div>
 				</div>
 			</div>
-		`).join('')}
+		`;}).join('')}
 		<div class="action-bar no-print">
 			<button class="btn btn-print" onclick="window.print()">🖨️ Print</button>
 			<button class="btn btn-save" onclick="saveStockLevels()">💾 Save Stock</button>
 		</div>
 	`;
 	document.getElementById('mainContent').innerHTML = html;
+}
+
+function calcRussiansTrolley(products) {
+	const needLoose = {};
+	let totalLoose = 0;
+	RUSSIAN_CODES.forEach(code => {
+		const p = products.find(pr => pr.code === code);
+		const bags = p ? p.plannedQty : 0;
+		const loose = bags * RUSSIAN_PER_BAG[code];
+		needLoose[code] = loose;
+		totalLoose += loose;
+	});
+
+	const batchesNeededCount = totalLoose <= 0 ? 0 : Math.ceil(totalLoose / RUSSIAN_BATCH_YIELD);
+	const looseAvailable = batchesNeededCount * RUSSIAN_BATCH_YIELD;
+
+	const suggestedBags = {};
+	let allocated = 0;
+	// R6, R5, R4 get a proportional share of the pool, rounded up
+	['R01', 'R02', 'R03'].forEach(code => {
+		const share = totalLoose > 0 ? needLoose[code] / totalLoose : 0;
+		const allocLoose = looseAvailable * share;
+		const bags = Math.ceil(allocLoose / RUSSIAN_PER_BAG[code]);
+		suggestedBags[code] = Math.max(0, bags);
+		allocated += suggestedBags[code] * RUSSIAN_PER_BAG[code];
+	});
+	// R3 absorbs whatever's left, in whole bags
+	const remainingForR04 = Math.max(0, looseAvailable - allocated);
+	suggestedBags['R04'] = Math.floor(remainingForR04 / RUSSIAN_PER_BAG['R04']);
+	allocated += suggestedBags['R04'] * RUSSIAN_PER_BAG['R04'];
+
+	const leftoverLoose = Math.max(0, looseAvailable - allocated);
+
+	return { needLoose, totalLoose, batchesNeeded: batchesNeededCount, looseAvailable, suggestedBags, leftoverLoose };
 }
 
 function rawNeed(p) {
@@ -507,12 +629,18 @@ function batchesNeeded(p) {
 }
 
 function produceQty(p) {
+	if (RUSSIAN_CODES.includes(p.code) && state.russianTrolley) {
+		return state.russianTrolley.suggestedBags[p.code] || 0;
+	}
 	const batches = batchesNeeded(p);
 	if (batches === null) return rawNeed(p); // no recipe — produce exactly what's needed
 	return batches * (p.bagsPerBatch || 0);
 }
 
 function batchLabel(p) {
+	if (RUSSIAN_CODES.includes(p.code)) {
+		return '🌭 pooled batch';
+	}
 	const batches = batchesNeeded(p);
 	if (batches === null || batches === 0) return '';
 	return `×${batches} batch${batches > 1 ? 'es' : ''}`;
@@ -525,7 +653,7 @@ function updateStock(idx, val) {
 	const batchesEl = document.getElementById(`batches_${idx}`);
 	if (batchesEl) batchesEl.textContent = batchLabel(state.products[idx]);
 
-	const totalStock = state.products.reduce((s, p) => s + (p.stockQty || 0), 0);
+	const totalStock = state.products.reduce((s, p) => s + (RUSSIAN_CODES.includes(p.code) ? 0 : (p.stockQty || 0)), 0);
 	const totalProduce = state.products.reduce((s, p) => s + produceQty(p), 0);
 	const totalStockEl = document.querySelectorAll('.summary-val')[1];
 	if (totalStockEl) totalStockEl.textContent = totalStock;
