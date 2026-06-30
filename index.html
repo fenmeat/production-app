@@ -93,6 +93,16 @@ body {
 	font-size: 11px;
 	font-weight: 700;
 }
+.src-badge {
+	display: inline-block;
+	padding: 2px 8px;
+	border-radius: 10px;
+	font-size: 11px;
+	font-weight: 700;
+	margin-right: 6px;
+}
+.src-badge.confirmed { background: var(--green); color: white; }
+.src-badge.forecast { background: #ddd; color: var(--text); }
 
 .content { padding-bottom: 90px; }
 
@@ -342,7 +352,8 @@ const state = {
 	routes: [],
 	period: '',
 	products: [], // {code, name, plannedQty, actualQty, stockQty}
-	russianTrolley: null // {totalLoose, batchesNeeded, looseAvailable, suggestedBags, leftoverLoose}
+	russianTrolley: null, // {totalLoose, batchesNeeded, looseAvailable, suggestedBags, leftoverLoose}
+	sourceByRoute: {} // route -> 'LOAD_LOG' | 'FORECAST'
 };
 
 function todayStr() {
@@ -402,6 +413,7 @@ async function loadPlanForDate() {
 
 		state.routes = data.routes || [];
 		state.period = data.period || 'NORMAL';
+		state.sourceByRoute = data.sourceByRoute || {};
 		state.products = (data.products || []).map(p => ({
 			code: p.code, name: p.name, plannedQty: p.qty, actualQty: p.qty, stockQty: 0, bagsPerBatch: 0
 		}));
@@ -485,7 +497,14 @@ function updateContextBar() {
 		return;
 	}
 	bar.style.display = 'block';
-	bar.innerHTML = `Routes: <span class="routes">${state.routes.join(', ')}</span><span class="period">${state.period.replace('_', ' ')}</span>`;
+	const routeBadges = state.routes.map(r => {
+		const src = state.sourceByRoute[r];
+		const badge = src === 'LOAD_LOG'
+			? `<span class="src-badge confirmed">✅ ${r}</span>`
+			: `<span class="src-badge forecast">📋 ${r}</span>`;
+		return badge;
+	}).join(' ');
+	bar.innerHTML = `${routeBadges}<span class="period">${state.period.replace('_', ' ')}</span>`;
 }
 
 function render() {
