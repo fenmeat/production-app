@@ -180,6 +180,13 @@ body {
 	font-weight: 700;
 	color: var(--copper);
 }
+.produce-batches {
+	text-align: center;
+	font-size: 10px;
+	color: var(--muted);
+	font-weight: 600;
+	margin-top: 1px;
+}
 
 .empty-state {
 	text-align: center;
@@ -333,11 +340,12 @@ async function loadPlanForDate() {
 		state.routes = data.routes || [];
 		state.period = data.period || 'NORMAL';
 		state.products = (data.products || []).map(p => ({
-			code: p.code, name: p.name, plannedQty: p.qty, actualQty: p.qty, stockQty: 0
+			code: p.code, name: p.name, plannedQty: p.qty, actualQty: p.qty, stockQty: 0, bagsPerBatch: 0
 		}));
 
-		// Pull current stock levels and any already-saved actuals for this date
+		// Pull current stock levels, batch sizes, and any already-saved actuals for this date
 		await loadStockLevels();
+		await loadBagsPerBatch();
 		await loadActualsForDate();
 
 		updateContextBar();
@@ -363,6 +371,25 @@ async function loadStockLevels() {
 		}
 	} catch (e) {
 		// Non-fatal — plan still shows, stock just defaults to 0
+	}
+}
+
+async function loadBagsPerBatch() {
+	try {
+		const url = `${SCRIPT_URL}?action=getBagsPerBatch&sheetId=${NEW_SHEET_ID}`;
+		const resp = await fetch(url);
+		const data = await resp.json();
+		if (data.status === 'ok') {
+			const bagsByCode = {};
+			(data.products || []).forEach(p => { bagsByCode[p.code] = p.bagsPerBatch; });
+			state.products.forEach(p => {
+				if (bagsByCode[p.code] !== undefined) {
+					p.bagsPerBatch = bagsByCode[p.code];
+				}
+			});
+		}
+	} catch (e) {
+		// Non-fatal — plan still shows, just without batch rounding
 	}
 }
 
@@ -453,7 +480,10 @@ function renderPlan() {
 						oninput="updateStock(${i}, this.value)"
 						onfocus="this.select()">
 				</div>
-				<div class="produce-qty" id="produce_${i}">${produceQty(p)}</div>
+				<div>
+					<div class="produce-qty" id="produce_${i}">${produceQty(p)}</div>
+					<div class="produce-batches" id="batches_${i}">${batchLabel(p)}</div>
+				</div>
 			</div>
 		`).join('')}
 		<div class="action-bar no-print">
@@ -464,14 +494,36 @@ function renderPlan() {
 	document.getElementById('mainContent').innerHTML = html;
 }
 
-function produceQty(p) {
+function rawNeed(p) {
 	return Math.max(0, p.plannedQty - (p.stockQty || 0));
+}
+
+function batchesNeeded(p) {
+	const bags = p.bagsPerBatch || 0;
+	if (bags <= 0) return null;
+	const need = rawNeed(p);
+	if (need === 0) return 0;
+	return Math.ceil(need / bags);
+}
+
+function produceQty(p) {
+	const batches = batchesNeeded(p);
+	if (batches === null) return rawNeed(p); // no recipe — produce exactly what's needed
+	return batches * (p.bagsPerBatch || 0);
+}
+
+function batchLabel(p) {
+	const batches = batchesNeeded(p);
+	if (batches === null || batches === 0) return '';
+	return `×${batches} batch${batches > 1 ? 'es' : ''}`;
 }
 
 function updateStock(idx, val) {
 	state.products[idx].stockQty = parseInt(val) || 0;
 	const produceEl = document.getElementById(`produce_${idx}`);
 	if (produceEl) produceEl.textContent = produceQty(state.products[idx]);
+	const batchesEl = document.getElementById(`batches_${idx}`);
+	if (batchesEl) batchesEl.textContent = batchLabel(state.products[idx]);
 
 	const totalStock = state.products.reduce((s, p) => s + (p.stockQty || 0), 0);
 	const totalProduce = state.products.reduce((s, p) => s + produceQty(p), 0);
