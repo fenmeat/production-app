@@ -289,6 +289,78 @@ body {
 	font-style: italic;
 }
 
+.trolleyplan-card {
+	background: #F4F0FF;
+	border: 1px solid #7B5EA7;
+	border-radius: 8px;
+	margin: 0 16px 12px;
+	padding: 14px 16px;
+}
+.trolleyplan-title {
+	font-size: 13px;
+	font-weight: 700;
+	color: #4a3570;
+	margin-bottom: 10px;
+}
+.tp-header {
+	display: grid;
+	grid-template-columns: 24px 1fr 1fr 50px;
+	gap: 6px;
+	font-size: 11px;
+	font-weight: 700;
+	color: #4a3570;
+	text-transform: uppercase;
+	letter-spacing: 0.3px;
+	padding-bottom: 6px;
+	border-bottom: 1px solid #d8ccec;
+	margin-bottom: 4px;
+}
+.tp-row {
+	display: grid;
+	grid-template-columns: 24px 1fr 1fr 50px;
+	gap: 6px;
+	align-items: center;
+	padding: 6px 0;
+	border-bottom: 1px solid #ece5f7;
+	font-size: 13px;
+}
+.tp-row:last-of-type { border-bottom: none; }
+.tp-num {
+	font-weight: 700;
+	color: #4a3570;
+}
+.tp-half {
+	background: white;
+	border-radius: 6px;
+	padding: 5px 8px;
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	gap: 4px;
+}
+.tp-bags {
+	font-weight: 700;
+	color: #4a3570;
+	font-size: 12px;
+}
+.tp-empty {
+	color: var(--muted);
+	font-style: italic;
+	font-size: 12px;
+}
+.tp-total {
+	text-align: center;
+	font-weight: 700;
+	color: #4a3570;
+}
+.tp-totals {
+	margin-top: 10px;
+	font-size: 12px;
+	font-weight: 600;
+	color: #4a3570;
+	text-align: right;
+}
+
 .unit-hint {
 	text-align: center;
 	font-size: 10px;
@@ -392,7 +464,13 @@ const RUSSIAN_CODES = ['R01', 'R02', 'R03', 'R04'];
 const POLONY_BAGS_PER_CASING = { P02: 20, P03: 14, P04: 8 };
 const POLONY_CODES = ['P02', 'P03', 'P04'];
 
+const VIENNA_CODES = ['V01', 'V02']; // support Full or Half batches
+
 const SKIP_BATCH_CODES = ['W07']; // Patties: cut from frozen rolls, no batch rounding
+
+// Products whose batches are physically cooked on shared trolleys (2 half-slots per trolley).
+// Confirmed scope: Russians (R01-R08, incl. pooled R01-R04) + Vienna/Cheese Vienna only.
+const TROLLEY_SCOPE_CODES = ['R01', 'R02', 'R03', 'R04', 'R05', 'R06', 'R07', 'R08', 'V01', 'V02'];
 
 const state = {
 	date: '',
@@ -402,6 +480,7 @@ const state = {
 	products: [], // {code, name, plannedQty, actualQty, stockQty}
 	russianTrolley: null, // {totalLoose, batchesNeeded, looseAvailable, suggestedBags, leftoverLoose}
 	polonyPlan: {}, // code -> {bagsNeeded, casingsOnTrolley, bagsAvailable, casingsToMake, pakUitTrolley, nuutTePak, surplusToTrolley}
+	trolleyPairs: [], // [{half1:{label,bags}, half2:{label,bags}|null}]
 	sourceByRoute: {} // route -> 'LOAD_LOG' | 'FORECAST'
 };
 
@@ -474,6 +553,7 @@ async function loadPlanForDate() {
 
 		state.russianTrolley = calcRussiansTrolley(state.products);
 		state.polonyPlan = calcPolonyPlan(state.products);
+		state.trolleyPairs = calcTrolleyPairs(state.products, state.russianTrolley);
 
 		updateContextBar();
 		render();
@@ -600,9 +680,13 @@ function renderPlan() {
 	const polonyCardInner = buildPolonyCardHTML(state.polonyPlan);
 	const polonyCard = `<div class="polony-card no-print" id="polonyCard">${polonyCardInner}</div>`;
 
+	const trolleyPlanInner = buildTrolleyPlanHTML(state.trolleyPairs);
+	const trolleyPlanCard = `<div class="trolleyplan-card no-print" id="trolleyPlanCard">${trolleyPlanInner}</div>`;
+
 	const html = `
 		${trolleyCard}
 		${polonyCard}
+		${trolleyPlanCard}
 		<div class="summary-bar no-print">
 			<div class="summary-item">
 				<div class="summary-val">${totalForecast}</div>
@@ -745,12 +829,31 @@ function batchesNeeded(p) {
 	return Math.ceil(need / bags);
 }
 
+// Vienna / Cheese Vienna can be cooked as Full or Half batches — half-batch size
+// is approximated as half of the full-batch bag yield (round to nearest bag).
+function viennaBatchInfo(p) {
+	const bagsPerBatch = p.bagsPerBatch || 0;
+	const halfSize = Math.round(bagsPerBatch / 2);
+	const need = rawNeed(p);
+	if (bagsPerBatch <= 0 || need === 0) {
+		return { fullBatches: 0, hasHalf: false, producedBags: 0, halfSize, bagsPerBatch };
+	}
+	const halfUnitsNeeded = Math.ceil(need / halfSize);
+	const fullBatches = Math.floor(halfUnitsNeeded / 2);
+	const hasHalf = halfUnitsNeeded % 2 === 1;
+	const producedBags = (fullBatches * bagsPerBatch) + (hasHalf ? halfSize : 0);
+	return { fullBatches, hasHalf, producedBags, halfSize, bagsPerBatch };
+}
+
 function produceQty(p) {
 	if (RUSSIAN_CODES.includes(p.code) && state.russianTrolley) {
 		return state.russianTrolley.suggestedBags[p.code] || 0;
 	}
 	if (POLONY_CODES.includes(p.code) && state.polonyPlan[p.code]) {
 		return state.polonyPlan[p.code].casingsToMake;
+	}
+	if (VIENNA_CODES.includes(p.code)) {
+		return viennaBatchInfo(p).producedBags;
 	}
 	if (SKIP_BATCH_CODES.includes(p.code)) {
 		return rawNeed(p); // no batch rounding — cut from frozen stock as needed
@@ -769,10 +872,80 @@ function batchLabel(p) {
 		if (plan.casingsToMake === 0) return plan.pakUitTrolley > 0 ? '✅ trolley only' : '';
 		return `${plan.casingsToMake} casing${plan.casingsToMake > 1 ? 's' : ''} to cook`;
 	}
+	if (VIENNA_CODES.includes(p.code)) {
+		const info = viennaBatchInfo(p);
+		if (info.fullBatches === 0 && !info.hasHalf) return '';
+		const parts = [];
+		if (info.fullBatches > 0) parts.push(`×${info.fullBatches} full`);
+		if (info.hasHalf) parts.push('+half');
+		return parts.join(' ');
+	}
 	if (SKIP_BATCH_CODES.includes(p.code)) return '';
 	const batches = batchesNeeded(p);
 	if (batches === null || batches === 0) return '';
 	return `×${batches} batch${batches > 1 ? 'es' : ''}`;
+}
+
+function calcTrolleyPairs(products, russianTrolley) {
+	const units = [];
+
+	// R01-R04 pooled loose-Russian batches
+	if (russianTrolley && russianTrolley.batchesNeeded > 0) {
+		for (let i = 0; i < russianTrolley.batchesNeeded; i++) {
+			units.push({ label: 'Loose Russian Batch', bags: RUSSIAN_BATCH_YIELD });
+		}
+	}
+
+	// R05-R08: standard full-batch products
+	['R05', 'R06', 'R07', 'R08'].forEach(code => {
+		const p = products.find(pr => pr.code === code);
+		if (!p) return;
+		const batches = batchesNeeded(p);
+		if (batches) {
+			for (let i = 0; i < batches; i++) {
+				units.push({ label: `${p.name} Full`, bags: p.bagsPerBatch });
+			}
+		}
+	});
+
+	// V01/V02: Full and optionally one Half batch
+	VIENNA_CODES.forEach(code => {
+		const p = products.find(pr => pr.code === code);
+		if (!p) return;
+		const info = viennaBatchInfo(p);
+		for (let i = 0; i < info.fullBatches; i++) {
+			units.push({ label: `${p.name} Full`, bags: p.bagsPerBatch });
+		}
+		if (info.hasHalf) {
+			units.push({ label: `${p.name} Half`, bags: info.halfSize });
+		}
+	});
+
+	const pairs = [];
+	for (let i = 0; i < units.length; i += 2) {
+		pairs.push({ half1: units[i], half2: units[i + 1] || null });
+	}
+	return pairs;
+}
+
+function buildTrolleyPlanHTML(pairs) {
+	if (!pairs || pairs.length === 0) return '';
+	const totalBags = pairs.reduce((s, tr) => s + tr.half1.bags + (tr.half2 ? tr.half2.bags : 0), 0);
+	return `
+		<div class="trolleyplan-title">🛒 Production Trolley Plan — Russian / Vienna batches</div>
+		<div class="tp-header">
+			<div>#</div><div>HALF 1</div><div>HALF 2</div><div>BAGS</div>
+		</div>
+		${pairs.map((tr, i) => `
+			<div class="tp-row">
+				<div class="tp-num">${i + 1}</div>
+				<div class="tp-half">${tr.half1.label}<span class="tp-bags">${tr.half1.bags}</span></div>
+				<div class="tp-half">${tr.half2 ? `${tr.half2.label}<span class="tp-bags">${tr.half2.bags}</span>` : '<span class="tp-empty">— open —</span>'}</div>
+				<div class="tp-total">${tr.half1.bags + (tr.half2 ? tr.half2.bags : 0)}</div>
+			</div>
+		`).join('')}
+		<div class="tp-totals">${pairs.length} trolleys needed · ${totalBags.toLocaleString()} bags total</div>
+	`;
 }
 
 function updateStock(idx, val) {
@@ -835,6 +1008,13 @@ function updateStock(idx, val) {
 	if (totalStockEl) totalStockEl.textContent = totalStock;
 	const totalProduceEl = document.getElementById('totalProduceVal');
 	if (totalProduceEl) totalProduceEl.textContent = totalProduce;
+
+	// Any product feeding the Trolley Plan (Russians R01-R08, Vienna V01/V02) needs a refresh
+	if (TROLLEY_SCOPE_CODES.includes(state.products[idx].code)) {
+		state.trolleyPairs = calcTrolleyPairs(state.products, state.russianTrolley);
+		const tpEl = document.getElementById('trolleyPlanCard');
+		if (tpEl) tpEl.innerHTML = buildTrolleyPlanHTML(state.trolleyPairs);
+	}
 }
 
 async function saveStockLevels() {
