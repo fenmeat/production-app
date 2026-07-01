@@ -329,6 +329,18 @@ body {
 	color: #4a3570;
 	margin-bottom: 10px;
 }
+.tp-warning {
+	background: #FDECEA;
+	border: 1px solid var(--red);
+	color: #8a2419;
+	border-radius: 6px;
+	padding: 8px 10px;
+	margin-bottom: 10px;
+	font-size: 12px;
+	font-weight: 600;
+	line-height: 1.4;
+}
+
 .tp-req-section {
 	background: white;
 	border-radius: 6px;
@@ -1034,6 +1046,7 @@ function batchLabel(p) {
 }
 
 const TROLLEY_BATCH_LABELS = ['RUSSIAN', 'ECONO RUSSIAN', 'CHEESE RUSSIAN', 'BABALAS RUSSIAN', 'VIENNA Full', 'VIENNA Half', 'CHEESE VIENNA Full', 'CHEESE VIENNA Half', 'POLONY'];
+const MAX_TROLLEYS_PER_DAY = 8;
 
 function trolleyBatchBags(label) {
 	const findP = code => state.products.find(pr => pr.code === code);
@@ -1106,7 +1119,17 @@ function buildDefaultTrolleyAssignments(req) {
 	const polonyCount = req['POLONY'] || 0;
 	for (let i = 0; i < polonyCount; i++) { polonyUnits.push('POLONY'); polonyUnits.push('POLONY'); }
 
-	return [...pairUnits(russianUnits), ...pairUnits(viennaUnits), ...pairUnits(polonyUnits)];
+	const allPairs = [...pairUnits(russianUnits), ...pairUnits(viennaUnits), ...pairUnits(polonyUnits)];
+	return allPairs.slice(0, MAX_TROLLEYS_PER_DAY);
+}
+
+function calcTotalTrolleysNeeded(req) {
+	const RUSSIAN_FAMILY = ['RUSSIAN', 'ECONO RUSSIAN', 'CHEESE RUSSIAN', 'BABALAS RUSSIAN'];
+	const VIENNA_FAMILY = ['VIENNA Full', 'VIENNA Half', 'CHEESE VIENNA Full', 'CHEESE VIENNA Half'];
+	const russianCount = RUSSIAN_FAMILY.reduce((s, l) => s + (req[l] || 0), 0);
+	const viennaCount = VIENNA_FAMILY.reduce((s, l) => s + (req[l] || 0), 0);
+	const polonyCount = req['POLONY'] || 0; // each casing-cook is its own full trolley
+	return Math.ceil(russianCount / 2) + Math.ceil(viennaCount / 2) + polonyCount;
 }
 
 function trolleyHalfSelectHTML(rowIdx, halfKey, currentVal) {
@@ -1132,6 +1155,11 @@ function buildTrolleyPlanCardHTML(req, assignments) {
 		</div>
 	`;
 
+	const totalNeeded = calcTotalTrolleysNeeded(req);
+	const overflowWarning = totalNeeded > MAX_TROLLEYS_PER_DAY ? `
+		<div class="tp-warning">⚠️ ${totalNeeded} trolleys needed today, but max capacity is ${MAX_TROLLEYS_PER_DAY} — ${totalNeeded - MAX_TROLLEYS_PER_DAY} trolley${totalNeeded - MAX_TROLLEYS_PER_DAY > 1 ? 's' : ''} won't fit. Choose what to prioritise below, or carry the rest to tomorrow.</div>
+	` : '';
+
 	const rows = assignments.map((a, i) => {
 		const b1 = trolleyBatchBags(a.half1);
 		const b2 = trolleyBatchBags(a.half2);
@@ -1149,7 +1177,8 @@ function buildTrolleyPlanCardHTML(req, assignments) {
 	}).join('');
 
 	return `
-		<div class="trolleyplan-title">🛒 Production Trolley Plan — editable</div>
+		<div class="trolleyplan-title">🛒 Production Trolley Plan — editable (${assignments.length}/${MAX_TROLLEYS_PER_DAY} trolleys)</div>
+		${overflowWarning}
 		${reqSection}
 		<div class="tp-header">
 			<div>#</div><div>HALF 1</div><div>HALF 2</div><div>BAGS</div>
