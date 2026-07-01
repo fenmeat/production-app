@@ -316,6 +316,97 @@ body {
 	font-style: italic;
 }
 
+.pt-title {
+	font-size: 13px;
+	font-weight: 700;
+	color: #1a5c1a;
+	margin-bottom: 8px;
+}
+.pt-title small {
+	font-weight: 400;
+	color: var(--muted);
+	font-size: 11px;
+}
+.pt-progress {
+	background: white;
+	border-radius: 6px;
+	padding: 8px 10px;
+	margin-bottom: 10px;
+}
+.pt-progress-row {
+	display: flex;
+	justify-content: space-between;
+	font-size: 13px;
+	padding: 2px 0;
+}
+.pt-header {
+	display: grid;
+	grid-template-columns: 16px 1fr 1fr 1fr 56px 18px;
+	gap: 4px;
+	font-size: 10px;
+	font-weight: 700;
+	color: #1a5c1a;
+	text-transform: uppercase;
+	letter-spacing: 0.3px;
+	padding-bottom: 4px;
+	border-bottom: 1px solid #cfe6cf;
+	margin-bottom: 4px;
+}
+.pt-row {
+	display: grid;
+	grid-template-columns: 16px 1fr 1fr 1fr 56px 18px;
+	gap: 4px;
+	align-items: center;
+	padding: 6px 0;
+	border-bottom: 1px solid #e2f0e2;
+}
+.pt-row:last-of-type { border-bottom: none; }
+.pt-row-over { background: #FDECEA; border-radius: 4px; }
+.pt-num {
+	font-weight: 700;
+	font-size: 12px;
+	color: #1a5c1a;
+}
+.pt-input-group {
+	background: white;
+	border-radius: 6px;
+	padding: 4px 6px;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+.pt-input-group label {
+	font-size: 9px;
+	text-transform: uppercase;
+	color: var(--muted);
+	font-weight: 700;
+}
+.pt-input {
+	width: 100%;
+	padding: 3px 4px;
+	font-size: 13px;
+	border: 1px solid var(--border);
+	border-radius: 4px;
+}
+.pt-bags {
+	font-size: 10px;
+	color: #1a5c1a;
+	font-weight: 600;
+	text-align: right;
+}
+.pt-total {
+	text-align: center;
+	font-size: 12px;
+	font-weight: 700;
+	color: #1a5c1a;
+}
+.pt-status {
+	font-size: 9px;
+	font-weight: 600;
+	color: var(--green);
+}
+.pt-row-over .pt-status { color: var(--red); }
+
 .trolleyplan-card {
 	background: #F4F0FF;
 	border: 1px solid #7B5EA7;
@@ -587,6 +678,7 @@ const state = {
 	polonyPlan: {}, // code -> {bagsNeeded, casingsOnTrolley, bagsAvailable, casingsToMake, pakUitTrolley, nuutTePak, surplusToTrolley}
 	batchesRequired: {}, // label -> count, e.g. {RUSSIAN: 2, 'CHEESE RUSSIAN': 1, ...}
 	trolleyAssignments: [], // [{half1: label|'', half2: label|''}] — user-editable, seeded from the auto-plan
+	polonyTrolleys: [], // [{small, med, long}] casing counts per trolley — user-editable, seeded from auto-fill
 	sourceByRoute: {} // route -> 'LOAD_LOG' | 'FORECAST'
 };
 
@@ -661,7 +753,8 @@ async function loadPlanForDate() {
 		state.polonyPlan = calcPolonyPlan(state.products);
 		state.batchesRequired = calcBatchesRequired(state.products, state.russianTrolley, state.polonyPlan);
 		state.trolleyAssignments = buildDefaultTrolleyAssignments(state.batchesRequired);
-		await loadSavedTrolleyPlan(); // overrides with a saved layout for this date, if one exists
+		state.polonyTrolleys = buildDefaultPolonyTrolleys(state.polonyPlan);
+		await loadSavedTrolleyPlan(); // overrides both trolleyAssignments and polonyTrolleys with a saved layout, if one exists
 
 		updateContextBar();
 		render();
@@ -966,7 +1059,124 @@ function buildPolonyCardHTML(plan) {
 		${row('Pack from new', d => d.nuutTePak)}
 		${row('Surplus → trolley', d => d.surplusToTrolley > 0 ? `+${d.surplusToTrolley}` : '0')}
 		<div class="polony-note">P01 Pizza Toppings = trimmings &amp; offcuts only — pack what yields, no target</div>
+		<div class="pc-divider"></div>
+		${buildPolonyTrolleyBuilderHTML(state.polonyTrolleys, plan)}
 	`;
+}
+
+function calcPolonyTrolleyRow(row) {
+	const bagsSmall = (row.small || 0) * POLONY_BAGS_PER_CASING.P02;
+	const bagsMed = (row.med || 0) * POLONY_BAGS_PER_CASING.P03;
+	const bagsLong = (row.long || 0) * POLONY_BAGS_PER_CASING.P04;
+	const totalCasings = (row.small || 0) + (row.med || 0) + (row.long || 0);
+	const totalBags = bagsSmall + bagsMed + bagsLong;
+	const over = totalCasings > POLONY_TROLLEY_CAPACITY;
+	return { bagsSmall, bagsMed, bagsLong, totalCasings, totalBags, over };
+}
+
+function buildDefaultPolonyTrolleys(plan) {
+	let small = plan.P02 ? plan.P02.casingsToMake : 0;
+	let med = plan.P03 ? plan.P03.casingsToMake : 0;
+	let long = plan.P04 ? plan.P04.casingsToMake : 0;
+	const trolleys = [];
+	while (small > 0 || med > 0 || long > 0) {
+		let remaining = POLONY_TROLLEY_CAPACITY;
+		const t = { small: 0, med: 0, long: 0 };
+		const takeSmall = Math.min(small, remaining); t.small = takeSmall; small -= takeSmall; remaining -= takeSmall;
+		const takeMed = Math.min(med, remaining); t.med = takeMed; med -= takeMed; remaining -= takeMed;
+		const takeLong = Math.min(long, remaining); t.long = takeLong; long -= takeLong; remaining -= takeLong;
+		trolleys.push(t);
+	}
+	return trolleys;
+}
+
+function buildPolonyTrolleyBuilderHTML(trolleys, plan) {
+	trolleys = trolleys || [];
+	const assignedSmall = trolleys.reduce((s, t) => s + (t.small || 0), 0);
+	const assignedMed = trolleys.reduce((s, t) => s + (t.med || 0), 0);
+	const assignedLong = trolleys.reduce((s, t) => s + (t.long || 0), 0);
+	const neededSmall = plan.P02 ? plan.P02.casingsToMake : 0;
+	const neededMed = plan.P03 ? plan.P03.casingsToMake : 0;
+	const neededLong = plan.P04 ? plan.P04.casingsToMake : 0;
+
+	const progressRow = (label, assigned, needed) => `
+		<div class="pt-progress-row">
+			<span>${label}</span>
+			<b class="${assigned >= needed ? 'pc-ok' : 'pc-cook'}">${assigned} / ${needed} casings</b>
+		</div>`;
+
+	const rows = trolleys.map((t, i) => {
+		const calc = calcPolonyTrolleyRow(t);
+		return `
+			<div class="pt-row ${calc.over ? 'pt-row-over' : ''}">
+				<div class="pt-num">${i + 1}</div>
+				<div class="pt-input-group">
+					<label>Small</label>
+					<input type="number" class="pt-input" min="0" value="${t.small || 0}" oninput="updatePolonyTrolley(${i}, 'small', this.value)">
+					<span class="pt-bags">${calc.bagsSmall} bags</span>
+				</div>
+				<div class="pt-input-group">
+					<label>Med</label>
+					<input type="number" class="pt-input" min="0" value="${t.med || 0}" oninput="updatePolonyTrolley(${i}, 'med', this.value)">
+					<span class="pt-bags">${calc.bagsMed} bags</span>
+				</div>
+				<div class="pt-input-group">
+					<label>Long</label>
+					<input type="number" class="pt-input" min="0" value="${t.long || 0}" oninput="updatePolonyTrolley(${i}, 'long', this.value)">
+					<span class="pt-bags">${calc.bagsLong} bags</span>
+				</div>
+				<div class="pt-total">
+					${calc.totalCasings}/${POLONY_TROLLEY_CAPACITY}
+					<div class="pt-status">${calc.over ? `🚫 ${calc.totalCasings - POLONY_TROLLEY_CAPACITY} too many` : '✔ OK'}</div>
+				</div>
+				<div class="tp-remove no-print" onclick="removePolonyTrolley(${i})" title="Remove trolley">✕</div>
+			</div>
+		`;
+	}).join('');
+
+	return `
+		<div class="pt-title">🧊 Polony Trolley Builder <small>(max ${POLONY_TROLLEY_CAPACITY} casings per trolley)</small></div>
+		<div class="pt-progress">
+			${progressRow('Small (P02)', assignedSmall, neededSmall)}
+			${progressRow('Med (P03)', assignedMed, neededMed)}
+			${progressRow('Long (P04)', assignedLong, neededLong)}
+		</div>
+		<div class="pt-header">
+			<div>#</div><div>SMALL</div><div>MED</div><div>LONG</div><div>CASINGS</div>
+		</div>
+		${rows || '<div class="tp-req-row"><span>No trolleys yet — add one below</span></div>'}
+		<div class="tp-actions no-print">
+			<button class="tp-btn" onclick="addPolonyTrolley()">+ Add Trolley</button>
+			<button class="tp-btn tp-btn-reset" onclick="resetPolonyTrolleys()">↺ Reset to Auto-Fill</button>
+			<button class="tp-btn tp-btn-save" onclick="saveTrolleyLayout()">💾 Save Layout</button>
+		</div>
+	`;
+}
+
+function refreshPolonyCard() {
+	const polonyEl = document.getElementById('polonyCard');
+	if (polonyEl) polonyEl.innerHTML = buildPolonyCardHTML(state.polonyPlan);
+}
+
+function updatePolonyTrolley(rowIdx, sizeKey, value) {
+	if (!state.polonyTrolleys[rowIdx]) return;
+	state.polonyTrolleys[rowIdx][sizeKey] = parseInt(value) || 0;
+	refreshPolonyCard();
+}
+
+function addPolonyTrolley() {
+	state.polonyTrolleys.push({ small: 0, med: 0, long: 0 });
+	refreshPolonyCard();
+}
+
+function removePolonyTrolley(rowIdx) {
+	state.polonyTrolleys.splice(rowIdx, 1);
+	refreshPolonyCard();
+}
+
+function resetPolonyTrolleys() {
+	state.polonyTrolleys = buildDefaultPolonyTrolleys(state.polonyPlan);
+	refreshPolonyCard();
 }
 
 function coldroomBagsFor(p) {
@@ -1045,7 +1255,10 @@ function batchLabel(p) {
 	return `×${batches} batch${batches > 1 ? 'es' : ''}`;
 }
 
-const TROLLEY_BATCH_LABELS = ['RUSSIAN', 'ECONO RUSSIAN', 'CHEESE RUSSIAN', 'BABALAS RUSSIAN', 'VIENNA Full', 'VIENNA Half', 'CHEESE VIENNA Full', 'CHEESE VIENNA Half', 'POLONY'];
+// POLONY removed from here — it now has its own dedicated Polony Trolley Builder (in the Polony Pack Plan card),
+// since Polony trolleys need per-size casing counts (max 10 casings/trolley) rather than a generic "casing cook".
+const TROLLEY_BATCH_LABELS = ['RUSSIAN', 'ECONO RUSSIAN', 'CHEESE RUSSIAN', 'BABALAS RUSSIAN', 'VIENNA Full', 'VIENNA Half', 'CHEESE VIENNA Full', 'CHEESE VIENNA Half'];
+const POLONY_TROLLEY_CAPACITY = 10;
 const MAX_TROLLEYS_PER_DAY = 8;
 
 function trolleyBatchBags(label) {
@@ -1083,9 +1296,7 @@ function calcBatchesRequired(products, russianTrolley, polonyPlan) {
 	req['CHEESE VIENNA Full'] = v02info.fullBatches;
 	req['CHEESE VIENNA Half'] = v02info.hasHalf ? 1 : 0;
 
-	let polonyCasings = 0;
-	POLONY_CODES.forEach(c => { if (polonyPlan[c]) polonyCasings += polonyPlan[c].casingsToMake; });
-	req['POLONY'] = polonyCasings;
+	// Polony is no longer counted here — see the dedicated Polony Trolley Builder instead
 
 	return req;
 }
@@ -1114,12 +1325,7 @@ function buildDefaultTrolleyAssignments(req) {
 	const russianUnits = buildUnits(RUSSIAN_FAMILY);
 	const viennaUnits = buildUnits(VIENNA_FAMILY);
 
-	// POLONY always takes a full trolley (both halves) — never shares with anything else
-	const polonyUnits = [];
-	const polonyCount = req['POLONY'] || 0;
-	for (let i = 0; i < polonyCount; i++) { polonyUnits.push('POLONY'); polonyUnits.push('POLONY'); }
-
-	const allPairs = [...pairUnits(russianUnits), ...pairUnits(viennaUnits), ...pairUnits(polonyUnits)];
+	const allPairs = [...pairUnits(russianUnits), ...pairUnits(viennaUnits)];
 	return allPairs.slice(0, MAX_TROLLEYS_PER_DAY);
 }
 
@@ -1128,8 +1334,7 @@ function calcTotalTrolleysNeeded(req) {
 	const VIENNA_FAMILY = ['VIENNA Full', 'VIENNA Half', 'CHEESE VIENNA Full', 'CHEESE VIENNA Half'];
 	const russianCount = RUSSIAN_FAMILY.reduce((s, l) => s + (req[l] || 0), 0);
 	const viennaCount = VIENNA_FAMILY.reduce((s, l) => s + (req[l] || 0), 0);
-	const polonyCount = req['POLONY'] || 0; // each casing-cook is its own full trolley
-	return Math.ceil(russianCount / 2) + Math.ceil(viennaCount / 2) + polonyCount;
+	return Math.ceil(russianCount / 2) + Math.ceil(viennaCount / 2);
 }
 
 function trolleyHalfSelectHTML(rowIdx, halfKey, currentVal) {
@@ -1224,8 +1429,18 @@ async function loadSavedTrolleyPlan() {
 		const url = `${SCRIPT_URL}?action=getTrolleyPlan&date=${state.date}&sheetId=${NEW_SHEET_ID}`;
 		const resp = await fetch(url);
 		const data = await resp.json();
-		if (data.status === 'ok' && data.found && Array.isArray(data.assignments) && data.assignments.length > 0) {
-			state.trolleyAssignments = data.assignments;
+		if (data.status === 'ok' && data.found && data.assignments) {
+			if (Array.isArray(data.assignments)) {
+				// Backward compatibility with saves made before the Polony Trolley Builder existed
+				if (data.assignments.length > 0) state.trolleyAssignments = data.assignments;
+			} else {
+				if (Array.isArray(data.assignments.trolleyAssignments) && data.assignments.trolleyAssignments.length > 0) {
+					state.trolleyAssignments = data.assignments.trolleyAssignments;
+				}
+				if (Array.isArray(data.assignments.polonyTrolleys)) {
+					state.polonyTrolleys = data.assignments.polonyTrolleys;
+				}
+			}
 		}
 	} catch (e) {
 		// Non-fatal — falls back to the freshly-built auto-plan
@@ -1242,7 +1457,10 @@ async function saveTrolleyLayout() {
 				action: 'saveTrolleyPlan',
 				sheetId: NEW_SHEET_ID,
 				date: state.date,
-				assignments: state.trolleyAssignments
+				assignments: {
+					trolleyAssignments: state.trolleyAssignments,
+					polonyTrolleys: state.polonyTrolleys
+				}
 			})
 		});
 		const data = await resp.json();
