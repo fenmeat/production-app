@@ -371,6 +371,12 @@ body {
 	letter-spacing: 0.3px;
 }
 
+.coldroom-input {
+	margin-top: 6px;
+	border-color: #7B5EA7;
+	background: #FAF8FF;
+}
+
 .stock-na {
 	text-align: center;
 	font-size: 12px;
@@ -472,6 +478,11 @@ const SKIP_BATCH_CODES = ['W07']; // Patties: cut from frozen rolls, no batch ro
 // Confirmed scope: Russians (R01-R08, incl. pooled R01-R04) + Vienna/Cheese Vienna only.
 const TROLLEY_SCOPE_CODES = ['R01', 'R02', 'R03', 'R04', 'R05', 'R06', 'R07', 'R08', 'V01', 'V02'];
 
+// Products with a "Coldroom" input (cooked/unpacked stock, separate from packed Stock):
+// R01-R07 + Vienna (coldroom measured in bags), Polony P02-P04 (coldroom measured in casings).
+// Excludes R08 (Jumbo, surplus product) and P01 (Pizza Toppings, offcuts only).
+const COLDROOM_SCOPE_CODES = ['R01', 'R02', 'R03', 'R04', 'R05', 'R06', 'R07', 'V01', 'V02', 'P02', 'P03', 'P04'];
+
 const state = {
 	date: '',
 	mode: 'plan', // 'plan' or 'actuals'
@@ -543,7 +554,7 @@ async function loadPlanForDate() {
 		state.period = data.period || 'NORMAL';
 		state.sourceByRoute = data.sourceByRoute || {};
 		state.products = (data.products || []).map(p => ({
-			code: p.code, name: p.name, plannedQty: p.qty, actualQty: p.qty, stockQty: 0, bagsPerBatch: 0
+			code: p.code, name: p.name, plannedQty: p.qty, actualQty: p.qty, stockQty: 0, coldroomQty: 0, bagsPerBatch: 0
 		}));
 
 		// Pull current stock levels, batch sizes, and any already-saved actuals for this date
@@ -569,10 +580,17 @@ async function loadStockLevels() {
 		const data = await resp.json();
 		if (data.status === 'ok') {
 			const stockByCode = {};
-			(data.products || []).forEach(p => { stockByCode[p.code] = p.qty; });
+			const coldroomByCode = {};
+			(data.products || []).forEach(p => {
+				stockByCode[p.code] = p.qty;
+				coldroomByCode[p.code] = p.coldroomQty || 0;
+			});
 			state.products.forEach(p => {
 				if (stockByCode[p.code] !== undefined) {
 					p.stockQty = stockByCode[p.code];
+				}
+				if (coldroomByCode[p.code] !== undefined) {
+					p.coldroomQty = coldroomByCode[p.code];
 				}
 			});
 		}
@@ -709,6 +727,8 @@ function renderPlan() {
 		</div>
 		${state.products.map((p, i) => {
 			const isPolony = POLONY_CODES.includes(p.code);
+			const hasColdroom = COLDROOM_SCOPE_CODES.includes(p.code);
+			const coldroomUnit = isPolony ? 'casings' : 'bags';
 			return `
 			<div class="product-row plan-mode">
 				<div>
@@ -719,9 +739,16 @@ function renderPlan() {
 				<div>
 					<input type="number" class="qty-input"
 						id="stock_${i}" value="${p.stockQty || 0}" min="0"
-						oninput="updateStock(${i}, this.value)"
+						oninput="updateStockField(${i}, 'stockQty', this.value)"
 						onfocus="this.select()">
-					${isPolony ? `<div class="unit-hint">casings</div>` : ''}
+					${isPolony ? `<div class="unit-hint">packed</div>` : ''}
+					${hasColdroom ? `
+						<input type="number" class="qty-input coldroom-input"
+							id="coldroom_${i}" value="${p.coldroomQty || 0}" min="0"
+							oninput="updateStockField(${i}, 'coldroomQty', this.value)"
+							onfocus="this.select()">
+						<div class="unit-hint">coldroom (${coldroomUnit})</div>
+					` : ''}
 				</div>
 				<div>
 					<div class="produce-qty" id="produce_${i}">${produceQty(p)}</div>
@@ -743,7 +770,7 @@ function calcRussiansTrolley(products) {
 	let totalLoose = 0;
 	RUSSIAN_CODES.forEach(code => {
 		const p = products.find(pr => pr.code === code);
-		const bagsNeeded = p ? Math.max(0, p.plannedQty - (p.stockQty || 0)) : 0;
+		const bagsNeeded = p ? rawNeed(p) : 0;
 		const loose = bagsNeeded * RUSSIAN_PER_BAG[code];
 		needLoose[code] = loose;
 		totalLoose += loose;
@@ -777,15 +804,21 @@ function calcPolonyPlan(products) {
 	POLONY_CODES.forEach(code => {
 		const p = products.find(pr => pr.code === code);
 		const bagsNeeded = p ? p.plannedQty : 0;
-		const casingsOnTrolley = p ? (p.stockQty || 0) : 0;
+		const packedStock = p ? (p.stockQty || 0) : 0;
+		const casingsOnTrolley = p ? (p.coldroomQty || 0) : 0;
 		const bagsPerCasing = POLONY_BAGS_PER_CASING[code];
+
+		// Stage 1: net off already-packed finished bags
+		const netBagsNeeded = Math.max(0, bagsNeeded - packedStock);
+
+		// Stage 2: cover the remainder from coldroom casings, then cook if still short
 		const bagsAvailable = casingsOnTrolley * bagsPerCasing;
-		const shortfall = bagsNeeded - bagsAvailable;
+		const shortfall = netBagsNeeded - bagsAvailable;
 		const casingsToMake = shortfall > 0 ? Math.ceil(shortfall / bagsPerCasing) : 0;
-		const pakUitTrolley = Math.min(bagsAvailable, bagsNeeded);
-		const nuutTePak = Math.max(0, bagsNeeded - bagsAvailable);
+		const pakUitTrolley = Math.min(bagsAvailable, netBagsNeeded);
+		const nuutTePak = Math.max(0, netBagsNeeded - bagsAvailable);
 		const surplusToTrolley = (casingsToMake * bagsPerCasing) - nuutTePak;
-		plan[code] = { bagsNeeded, casingsOnTrolley, bagsAvailable, casingsToMake, pakUitTrolley, nuutTePak, surplusToTrolley };
+		plan[code] = { bagsNeeded, packedStock, netBagsNeeded, casingsOnTrolley, bagsAvailable, casingsToMake, pakUitTrolley, nuutTePak, surplusToTrolley };
 	});
 	return plan;
 }
@@ -806,6 +839,9 @@ function buildPolonyCardHTML(plan) {
 			<div class="pc-val"><b>LONG</b><br><small>P04</small></div>
 		</div>
 		${row('Bags needed', d => d.bagsNeeded)}
+		${row('Packed stock', d => d.packedStock)}
+		${row('Net bags needed', d => d.netBagsNeeded)}
+		<div class="pc-divider"></div>
 		${row('Casings on trolley', d => d.casingsOnTrolley)}
 		${row('Bags from trolley', d => d.bagsAvailable)}
 		<div class="pc-divider"></div>
@@ -818,7 +854,7 @@ function buildPolonyCardHTML(plan) {
 }
 
 function rawNeed(p) {
-	return Math.max(0, p.plannedQty - (p.stockQty || 0));
+	return Math.max(0, p.plannedQty - (p.stockQty || 0) - (p.coldroomQty || 0));
 }
 
 function batchesNeeded(p) {
@@ -948,8 +984,8 @@ function buildTrolleyPlanHTML(pairs) {
 	`;
 }
 
-function updateStock(idx, val) {
-	state.products[idx].stockQty = parseInt(val) || 0;
+function updateStockField(idx, field, val) {
+	state.products[idx][field] = parseInt(val) || 0;
 
 	// If this is a Russian code, recalculate the whole trolley and refresh all Russian rows
 	if (RUSSIAN_CODES.includes(state.products[idx].code)) {
@@ -1020,7 +1056,7 @@ function updateStock(idx, val) {
 async function saveStockLevels() {
 	showToast('💾 Saving stock...', '');
 
-	const rows = state.products.map(p => ({ code: p.code, qty: p.stockQty || 0 }));
+	const rows = state.products.map(p => ({ code: p.code, qty: p.stockQty || 0, coldroomQty: p.coldroomQty || 0 }));
 
 	try {
 		const resp = await fetch(SCRIPT_URL, {
