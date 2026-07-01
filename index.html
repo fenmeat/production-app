@@ -935,7 +935,6 @@ function renderPlan() {
 				<div>
 					<div class="produce-qty" id="produce_${i}">${produceQty(p)}</div>
 					<div class="produce-batches" id="batches_${i}">${batchLabel(p)}</div>
-					${isPolony ? `<div class="unit-hint">casings</div>` : ''}
 				</div>
 			</div>
 		`;}).join('')}
@@ -1219,7 +1218,8 @@ function produceQty(p) {
 		return state.russianTrolley.suggestedBags[p.code] || 0;
 	}
 	if (POLONY_CODES.includes(p.code) && state.polonyPlan[p.code]) {
-		return state.polonyPlan[p.code].casingsToMake;
+		const casings = state.polonyPlan[p.code].casingsToMake;
+		return casings * (POLONY_BAGS_PER_CASING[p.code] || 0);
 	}
 	if (VIENNA_CODES.includes(p.code)) {
 		return viennaBatchInfo(p).producedBags;
