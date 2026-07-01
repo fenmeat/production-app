@@ -256,6 +256,33 @@ body {
 	font-style: italic;
 }
 
+.trolley-coldroom-input {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	gap: 10px;
+	background: white;
+	border: 1px solid var(--copper);
+	border-radius: 6px;
+	padding: 8px 10px;
+	margin: 8px 0;
+}
+.trolley-coldroom-input span {
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--copper-dark);
+}
+.trolley-coldroom-input small {
+	font-weight: 400;
+	color: var(--muted);
+	display: block;
+	font-size: 11px;
+}
+.trolley-coldroom-input input {
+	width: 70px;
+	flex-shrink: 0;
+}
+
 .polony-card {
 	background: #F0F7F0;
 	border: 1px solid var(--green);
@@ -479,9 +506,14 @@ const SKIP_BATCH_CODES = ['W07']; // Patties: cut from frozen rolls, no batch ro
 const TROLLEY_SCOPE_CODES = ['R01', 'R02', 'R03', 'R04', 'R05', 'R06', 'R07', 'R08', 'V01', 'V02'];
 
 // Products with a "Coldroom" input (cooked/unpacked stock, separate from packed Stock):
-// R01-R07 + Vienna (coldroom measured in bags), Polony P02-P04 (coldroom measured in casings).
+// R05-R07 + Vienna: measured in BATCHES (can't count individual bags off an uncut trolley) —
+// app converts batches × bagsPerBatch internally.
+// Polony P02-P04: measured in CASINGS (already the natural batch-equivalent unit).
+// R01-R04 (pooled Russians) do NOT get a per-size input here — they use a single "Coldroom
+// Batches" input on the Russians Trolley card instead (see russianColdroomBatches in state).
 // Excludes R08 (Jumbo, surplus product) and P01 (Pizza Toppings, offcuts only).
-const COLDROOM_SCOPE_CODES = ['R01', 'R02', 'R03', 'R04', 'R05', 'R06', 'R07', 'V01', 'V02', 'P02', 'P03', 'P04'];
+const COLDROOM_SCOPE_CODES = ['R05', 'R06', 'R07', 'V01', 'V02', 'P02', 'P03', 'P04'];
+const COLDROOM_BATCH_CODES = ['R05', 'R06', 'R07', 'V01', 'V02']; // these convert batches->bags via bagsPerBatch
 
 const state = {
 	date: '',
@@ -490,6 +522,7 @@ const state = {
 	period: '',
 	products: [], // {code, name, plannedQty, actualQty, stockQty}
 	russianTrolley: null, // {totalLoose, batchesNeeded, looseAvailable, suggestedBags, leftoverLoose}
+	russianColdroomBatches: 0, // whole/partial batches (1 batch = 1310 loose) already cooked, sitting in coldroom
 	polonyPlan: {}, // code -> {bagsNeeded, casingsOnTrolley, bagsAvailable, casingsToMake, pakUitTrolley, nuutTePak, surplusToTrolley}
 	trolleyPairs: [], // [{half1:{label,bags}, half2:{label,bags}|null}]
 	sourceByRoute: {} // route -> 'LOAD_LOG' | 'FORECAST'
@@ -562,7 +595,7 @@ async function loadPlanForDate() {
 		await loadBagsPerBatch();
 		await loadActualsForDate();
 
-		state.russianTrolley = calcRussiansTrolley(state.products);
+		state.russianTrolley = calcRussiansTrolley(state.products, state.russianColdroomBatches);
 		state.polonyPlan = calcPolonyPlan(state.products);
 		state.trolleyPairs = calcTrolleyPairs(state.products, state.russianTrolley);
 
@@ -593,6 +626,11 @@ async function loadStockLevels() {
 					p.coldroomQty = coldroomByCode[p.code];
 				}
 			});
+			// RUSSIAN_TROLLEY is a dedicated STOCK row (not one of the 31 active products) —
+			// its COLDROOM_STOCK value holds whole/partial batches, not bags
+			if (coldroomByCode['RUSSIAN_TROLLEY'] !== undefined) {
+				state.russianColdroomBatches = coldroomByCode['RUSSIAN_TROLLEY'];
+			}
 		}
 	} catch (e) {
 		// Non-fatal — plan still shows, stock just defaults to 0
@@ -679,21 +717,8 @@ function renderPlan() {
 	const totalProduce = state.products.reduce((s, p) => s + produceQty(p), 0);
 
 	const rt = state.russianTrolley;
-	const trolleyCard = (rt && rt.totalLoose > 0) ? `
-		<div class="trolley-card no-print" id="trolleyCard">
-			<div class="trolley-title">🌭 Russians Trolley — R6/R5/R4/R3 pooled batches</div>
-			<div class="trolley-row"><span>Loose Russians needed</span><b>${rt.totalLoose.toLocaleString()}</b></div>
-			<div class="trolley-row"><span>Batches required (1 batch = ${RUSSIAN_BATCH_YIELD.toLocaleString()})</span><b>${rt.batchesNeeded}</b></div>
-			<div class="trolley-row"><span>Loose Russians available</span><b>${rt.looseAvailable.toLocaleString()}</b></div>
-			<div class="trolley-split">
-				<div><span>R6</span><b>${rt.suggestedBags.R01}</b></div>
-				<div><span>R5</span><b>${rt.suggestedBags.R02}</b></div>
-				<div><span>R4</span><b>${rt.suggestedBags.R03}</b></div>
-				<div><span>R3</span><b>${rt.suggestedBags.R04}</b></div>
-			</div>
-			${rt.leftoverLoose > 0 ? `<div class="trolley-leftover">Leftover loose: ${rt.leftoverLoose} (pack as Jumbo Russian or carry over)</div>` : ''}
-		</div>
-	` : `<div id="trolleyCard"></div>`;
+	const trolleyCardInner = buildTrolleyCardHTML(rt, state.russianColdroomBatches);
+	const trolleyCard = `<div class="trolley-card no-print" id="trolleyCard">${trolleyCardInner}</div>`;
 
 	const polonyCardInner = buildPolonyCardHTML(state.polonyPlan);
 	const polonyCard = `<div class="polony-card no-print" id="polonyCard">${polonyCardInner}</div>`;
@@ -728,7 +753,7 @@ function renderPlan() {
 		${state.products.map((p, i) => {
 			const isPolony = POLONY_CODES.includes(p.code);
 			const hasColdroom = COLDROOM_SCOPE_CODES.includes(p.code);
-			const coldroomUnit = isPolony ? 'casings' : 'bags';
+			const coldroomUnit = isPolony ? 'casings' : 'batches';
 			return `
 			<div class="product-row plan-mode">
 				<div>
@@ -744,7 +769,7 @@ function renderPlan() {
 					${isPolony ? `<div class="unit-hint">packed</div>` : ''}
 					${hasColdroom ? `
 						<input type="number" class="qty-input coldroom-input"
-							id="coldroom_${i}" value="${p.coldroomQty || 0}" min="0"
+							id="coldroom_${i}" value="${p.coldroomQty || 0}" min="0" step="0.5"
 							oninput="updateStockField(${i}, 'coldroomQty', this.value)"
 							onfocus="this.select()">
 						<div class="unit-hint">coldroom (${coldroomUnit})</div>
@@ -765,7 +790,31 @@ function renderPlan() {
 	document.getElementById('mainContent').innerHTML = html;
 }
 
-function calcRussiansTrolley(products) {
+function buildTrolleyCardHTML(rt, coldroomBatches) {
+	if (!rt || rt.totalLoose <= 0) return '';
+	return `
+		<div class="trolley-title">🌭 Russians Trolley — R6/R5/R4/R3 pooled batches</div>
+		<div class="trolley-row"><span>Loose Russians needed</span><b>${rt.totalLoose.toLocaleString()}</b></div>
+		<div class="trolley-coldroom-input">
+			<span>Coldroom batches on hand <small>(1 batch = ${RUSSIAN_BATCH_YIELD.toLocaleString()} loose)</small></span>
+			<input type="number" class="qty-input" id="russianColdroomInput" value="${coldroomBatches || 0}" min="0" step="0.5"
+				oninput="updateRussianColdroomBatches(this.value)" onfocus="this.select()">
+		</div>
+		<div class="trolley-row"><span>Loose Russians from coldroom</span><b>${rt.coldroomLoose.toLocaleString()}</b></div>
+		<div class="trolley-row"><span>New batches to cook (1 batch = ${RUSSIAN_BATCH_YIELD.toLocaleString()})</span><b>${rt.batchesNeeded}</b></div>
+		<div class="trolley-row"><span>Total loose Russians available</span><b>${rt.looseAvailable.toLocaleString()}</b></div>
+		<div class="trolley-split">
+			<div><span>R6</span><b>${rt.suggestedBags.R01}</b></div>
+			<div><span>R5</span><b>${rt.suggestedBags.R02}</b></div>
+			<div><span>R4</span><b>${rt.suggestedBags.R03}</b></div>
+			<div><span>R3</span><b>${rt.suggestedBags.R04}</b></div>
+		</div>
+		${rt.leftoverLoose > 0 ? `<div class="trolley-leftover">Leftover loose: ${rt.leftoverLoose} (pack as Jumbo Russian or carry over)</div>` : ''}
+	`;
+}
+
+function calcRussiansTrolley(products, coldroomBatches) {
+	coldroomBatches = coldroomBatches || 0;
 	const needLoose = {};
 	let totalLoose = 0;
 	RUSSIAN_CODES.forEach(code => {
@@ -776,8 +825,11 @@ function calcRussiansTrolley(products) {
 		totalLoose += loose;
 	});
 
-	const batchesNeededCount = totalLoose <= 0 ? 0 : Math.ceil(totalLoose / RUSSIAN_BATCH_YIELD);
-	const looseAvailable = batchesNeededCount * RUSSIAN_BATCH_YIELD;
+	const coldroomLoose = coldroomBatches * RUSSIAN_BATCH_YIELD;
+	const shortfall = Math.max(0, totalLoose - coldroomLoose);
+	const batchesNeededCount = shortfall <= 0 ? 0 : Math.ceil(shortfall / RUSSIAN_BATCH_YIELD);
+	const newLoose = batchesNeededCount * RUSSIAN_BATCH_YIELD;
+	const looseAvailable = coldroomLoose + newLoose;
 
 	const suggestedBags = {};
 	let allocated = 0;
@@ -796,7 +848,7 @@ function calcRussiansTrolley(products) {
 
 	const leftoverLoose = Math.max(0, looseAvailable - allocated);
 
-	return { needLoose, totalLoose, batchesNeeded: batchesNeededCount, looseAvailable, suggestedBags, leftoverLoose };
+	return { needLoose, totalLoose, coldroomLoose, batchesNeeded: batchesNeededCount, looseAvailable, suggestedBags, leftoverLoose };
 }
 
 function calcPolonyPlan(products) {
@@ -853,8 +905,15 @@ function buildPolonyCardHTML(plan) {
 	`;
 }
 
+function coldroomBagsFor(p) {
+	if (COLDROOM_BATCH_CODES.includes(p.code)) {
+		return (p.coldroomQty || 0) * (p.bagsPerBatch || 0);
+	}
+	return 0; // Polony's coldroom (casings) is handled separately in calcPolonyPlan
+}
+
 function rawNeed(p) {
-	return Math.max(0, p.plannedQty - (p.stockQty || 0) - (p.coldroomQty || 0));
+	return Math.max(0, p.plannedQty - (p.stockQty || 0) - coldroomBagsFor(p));
 }
 
 function batchesNeeded(p) {
@@ -985,28 +1044,14 @@ function buildTrolleyPlanHTML(pairs) {
 }
 
 function updateStockField(idx, field, val) {
-	state.products[idx][field] = parseInt(val) || 0;
+	state.products[idx][field] = field === 'coldroomQty' ? (parseFloat(val) || 0) : (parseInt(val) || 0);
 
 	// If this is a Russian code, recalculate the whole trolley and refresh all Russian rows
 	if (RUSSIAN_CODES.includes(state.products[idx].code)) {
-		state.russianTrolley = calcRussiansTrolley(state.products);
-		const rt = state.russianTrolley;
+		state.russianTrolley = calcRussiansTrolley(state.products, state.russianColdroomBatches);
 		const trolleyEl = document.getElementById('trolleyCard');
 		if (trolleyEl) {
-			trolleyEl.className = 'trolley-card no-print';
-			trolleyEl.innerHTML = rt && rt.totalLoose > 0 ? `
-				<div class="trolley-title">🌭 Russians Trolley — R6/R5/R4/R3 pooled batches</div>
-				<div class="trolley-row"><span>Loose Russians needed</span><b>${rt.totalLoose.toLocaleString()}</b></div>
-				<div class="trolley-row"><span>Batches required (1 batch = ${RUSSIAN_BATCH_YIELD.toLocaleString()})</span><b>${rt.batchesNeeded}</b></div>
-				<div class="trolley-row"><span>Loose Russians available</span><b>${rt.looseAvailable.toLocaleString()}</b></div>
-				<div class="trolley-split">
-					<div><span>R6</span><b>${rt.suggestedBags.R01}</b></div>
-					<div><span>R5</span><b>${rt.suggestedBags.R02}</b></div>
-					<div><span>R4</span><b>${rt.suggestedBags.R03}</b></div>
-					<div><span>R3</span><b>${rt.suggestedBags.R04}</b></div>
-				</div>
-				${rt.leftoverLoose > 0 ? `<div class="trolley-leftover">Leftover loose: ${rt.leftoverLoose} (pack as Jumbo Russian or carry over)</div>` : ''}
-			` : '';
+			trolleyEl.innerHTML = buildTrolleyCardHTML(state.russianTrolley, state.russianColdroomBatches);
 		}
 		// Update all four Russian produce/batch cells
 		state.products.forEach((p, i) => {
@@ -1053,10 +1098,46 @@ function updateStockField(idx, field, val) {
 	}
 }
 
+function updateRussianColdroomBatches(val) {
+	state.russianColdroomBatches = parseFloat(val) || 0;
+	state.russianTrolley = calcRussiansTrolley(state.products, state.russianColdroomBatches);
+
+	const trolleyEl = document.getElementById('trolleyCard');
+	if (trolleyEl) {
+		trolleyEl.innerHTML = buildTrolleyCardHTML(state.russianTrolley, state.russianColdroomBatches);
+		const input = document.getElementById('russianColdroomInput');
+		if (input) {
+			input.focus();
+			const len = input.value.length;
+			input.setSelectionRange(len, len);
+		}
+	}
+
+	// R01-R04 produce/batch cells depend on the trolley allocation
+	state.products.forEach((p, i) => {
+		if (RUSSIAN_CODES.includes(p.code)) {
+			const produceEl = document.getElementById(`produce_${i}`);
+			if (produceEl) produceEl.textContent = produceQty(p);
+			const batchesEl = document.getElementById(`batches_${i}`);
+			if (batchesEl) batchesEl.textContent = batchLabel(p);
+		}
+	});
+
+	const totalProduce = state.products.reduce((s, p) => s + produceQty(p), 0);
+	const totalProduceEl = document.getElementById('totalProduceVal');
+	if (totalProduceEl) totalProduceEl.textContent = totalProduce;
+
+	// Trolley Plan also depends on the Russians pool's batch count
+	state.trolleyPairs = calcTrolleyPairs(state.products, state.russianTrolley);
+	const tpEl = document.getElementById('trolleyPlanCard');
+	if (tpEl) tpEl.innerHTML = buildTrolleyPlanHTML(state.trolleyPairs);
+}
+
 async function saveStockLevels() {
 	showToast('💾 Saving stock...', '');
 
 	const rows = state.products.map(p => ({ code: p.code, qty: p.stockQty || 0, coldroomQty: p.coldroomQty || 0 }));
+	rows.push({ code: 'RUSSIAN_TROLLEY', qty: 0, coldroomQty: state.russianColdroomBatches || 0 });
 
 	try {
 		const resp = await fetch(SCRIPT_URL, {
