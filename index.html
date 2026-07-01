@@ -329,9 +329,30 @@ body {
 	color: #4a3570;
 	margin-bottom: 10px;
 }
+.tp-req-section {
+	background: white;
+	border-radius: 6px;
+	padding: 8px 10px;
+	margin-bottom: 10px;
+}
+.tp-req-title {
+	font-size: 11px;
+	font-weight: 700;
+	color: #4a3570;
+	text-transform: uppercase;
+	letter-spacing: 0.3px;
+	margin-bottom: 4px;
+}
+.tp-req-row {
+	display: flex;
+	justify-content: space-between;
+	font-size: 13px;
+	padding: 2px 0;
+}
+.tp-req-row b { color: #4a3570; }
 .tp-header {
 	display: grid;
-	grid-template-columns: 24px 1fr 1fr 50px;
+	grid-template-columns: 20px 1fr 1fr 46px 20px;
 	gap: 6px;
 	font-size: 11px;
 	font-weight: 700;
@@ -344,7 +365,7 @@ body {
 }
 .tp-row {
 	display: grid;
-	grid-template-columns: 24px 1fr 1fr 50px;
+	grid-template-columns: 20px 1fr 1fr 46px 20px;
 	gap: 6px;
 	align-items: center;
 	padding: 6px 0;
@@ -359,16 +380,24 @@ body {
 .tp-half {
 	background: white;
 	border-radius: 6px;
-	padding: 5px 8px;
+	padding: 4px 6px;
 	display: flex;
-	justify-content: space-between;
-	align-items: center;
-	gap: 4px;
+	flex-direction: column;
+	gap: 2px;
+}
+.tp-select {
+	width: 100%;
+	padding: 4px;
+	font-size: 12px;
+	border: 1px solid var(--border);
+	border-radius: 4px;
+	background: white;
 }
 .tp-bags {
 	font-weight: 700;
 	color: #4a3570;
-	font-size: 12px;
+	font-size: 11px;
+	text-align: right;
 }
 .tp-empty {
 	color: var(--muted);
@@ -379,14 +408,35 @@ body {
 	text-align: center;
 	font-weight: 700;
 	color: #4a3570;
-}
-.tp-totals {
-	margin-top: 10px;
 	font-size: 12px;
-	font-weight: 600;
-	color: #4a3570;
-	text-align: right;
 }
+.tp-remove {
+	text-align: center;
+	color: var(--red);
+	font-weight: 700;
+	cursor: pointer;
+	font-size: 14px;
+}
+.tp-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin-top: 10px;
+}
+.tp-btn {
+	flex: 1;
+	min-width: 100px;
+	padding: 8px;
+	border: 1px solid #7B5EA7;
+	border-radius: 6px;
+	background: white;
+	color: #4a3570;
+	font-size: 12px;
+	font-weight: 700;
+	cursor: pointer;
+}
+.tp-btn-reset { background: #F4F0FF; }
+.tp-btn-save { background: #7B5EA7; color: white; }
 
 .unit-hint {
 	text-align: center;
@@ -503,7 +553,6 @@ const SKIP_BATCH_CODES = ['W07']; // Patties: cut from frozen rolls, no batch ro
 
 // Products whose batches are physically cooked on shared trolleys (2 half-slots per trolley).
 // Confirmed scope: Russians (R01-R08, incl. pooled R01-R04) + Vienna/Cheese Vienna only.
-const TROLLEY_SCOPE_CODES = ['R01', 'R02', 'R03', 'R04', 'R05', 'R06', 'R07', 'R08', 'V01', 'V02'];
 
 // Products with a "Coldroom" input (cooked/unpacked stock, separate from packed Stock):
 // R05-R07 + Vienna: measured in BATCHES (can't count individual bags off an uncut trolley) —
@@ -524,7 +573,8 @@ const state = {
 	russianTrolley: null, // {totalLoose, batchesNeeded, looseAvailable, suggestedBags, leftoverLoose}
 	russianColdroomBatches: 0, // whole/partial batches (1 batch = 1310 loose) already cooked, sitting in coldroom
 	polonyPlan: {}, // code -> {bagsNeeded, casingsOnTrolley, bagsAvailable, casingsToMake, pakUitTrolley, nuutTePak, surplusToTrolley}
-	trolleyPairs: [], // [{half1:{label,bags}, half2:{label,bags}|null}]
+	batchesRequired: {}, // label -> count, e.g. {RUSSIAN: 2, 'CHEESE RUSSIAN': 1, ...}
+	trolleyAssignments: [], // [{half1: label|'', half2: label|''}] — user-editable, seeded from the auto-plan
 	sourceByRoute: {} // route -> 'LOAD_LOG' | 'FORECAST'
 };
 
@@ -597,7 +647,9 @@ async function loadPlanForDate() {
 
 		state.russianTrolley = calcRussiansTrolley(state.products, state.russianColdroomBatches);
 		state.polonyPlan = calcPolonyPlan(state.products);
-		state.trolleyPairs = calcTrolleyPairs(state.products, state.russianTrolley);
+		state.batchesRequired = calcBatchesRequired(state.products, state.russianTrolley, state.polonyPlan);
+		state.trolleyAssignments = buildDefaultTrolleyAssignments(state.batchesRequired);
+		await loadSavedTrolleyPlan(); // overrides with a saved layout for this date, if one exists
 
 		updateContextBar();
 		render();
@@ -723,7 +775,7 @@ function renderPlan() {
 	const polonyCardInner = buildPolonyCardHTML(state.polonyPlan);
 	const polonyCard = `<div class="polony-card no-print" id="polonyCard">${polonyCardInner}</div>`;
 
-	const trolleyPlanInner = buildTrolleyPlanHTML(state.trolleyPairs);
+	const trolleyPlanInner = buildTrolleyPlanCardHTML(state.batchesRequired, state.trolleyAssignments);
 	const trolleyPlanCard = `<div class="trolleyplan-card no-print" id="trolleyPlanCard">${trolleyPlanInner}</div>`;
 
 	const html = `
@@ -981,66 +1033,198 @@ function batchLabel(p) {
 	return `×${batches} batch${batches > 1 ? 'es' : ''}`;
 }
 
-function calcTrolleyPairs(products, russianTrolley) {
-	const units = [];
+const TROLLEY_BATCH_LABELS = ['RUSSIAN', 'ECONO RUSSIAN', 'CHEESE RUSSIAN', 'BABALAS RUSSIAN', 'VIENNA Full', 'VIENNA Half', 'CHEESE VIENNA Full', 'CHEESE VIENNA Half', 'POLONY'];
 
-	// R01-R04 pooled loose-Russian batches
-	if (russianTrolley && russianTrolley.batchesNeeded > 0) {
-		for (let i = 0; i < russianTrolley.batchesNeeded; i++) {
-			units.push({ label: 'Loose Russian Batch', bags: RUSSIAN_BATCH_YIELD });
-		}
-	}
-
-	// R05-R08: standard full-batch products
-	['R05', 'R06', 'R07', 'R08'].forEach(code => {
-		const p = products.find(pr => pr.code === code);
-		if (!p) return;
-		const batches = batchesNeeded(p);
-		if (batches) {
-			for (let i = 0; i < batches; i++) {
-				units.push({ label: `${p.name} Full`, bags: p.bagsPerBatch });
-			}
-		}
-	});
-
-	// V01/V02: Full and optionally one Half batch
-	VIENNA_CODES.forEach(code => {
-		const p = products.find(pr => pr.code === code);
-		if (!p) return;
-		const info = viennaBatchInfo(p);
-		for (let i = 0; i < info.fullBatches; i++) {
-			units.push({ label: `${p.name} Full`, bags: p.bagsPerBatch });
-		}
-		if (info.hasHalf) {
-			units.push({ label: `${p.name} Half`, bags: info.halfSize });
-		}
-	});
-
-	const pairs = [];
-	for (let i = 0; i < units.length; i += 2) {
-		pairs.push({ half1: units[i], half2: units[i + 1] || null });
-	}
-	return pairs;
+function trolleyBatchBags(label) {
+	const findP = code => state.products.find(pr => pr.code === code);
+	if (label === 'RUSSIAN') return RUSSIAN_BATCH_YIELD;
+	if (label === 'ECONO RUSSIAN') { const p = findP('R05'); return p ? (p.bagsPerBatch || 0) : 0; }
+	if (label === 'CHEESE RUSSIAN') { const p = findP('R06'); return p ? (p.bagsPerBatch || 0) : 0; }
+	if (label === 'BABALAS RUSSIAN') { const p = findP('R07'); return p ? (p.bagsPerBatch || 0) : 0; }
+	if (label === 'VIENNA Full') { const p = findP('V01'); return p ? (p.bagsPerBatch || 0) : 0; }
+	if (label === 'VIENNA Half') { const p = findP('V01'); return p ? Math.round((p.bagsPerBatch || 0) / 2) : 0; }
+	if (label === 'CHEESE VIENNA Full') { const p = findP('V02'); return p ? (p.bagsPerBatch || 0) : 0; }
+	if (label === 'CHEESE VIENNA Half') { const p = findP('V02'); return p ? Math.round((p.bagsPerBatch || 0) / 2) : 0; }
+	if (label === 'POLONY') return null; // varies by product — no single bag count
+	return 0;
 }
 
-function buildTrolleyPlanHTML(pairs) {
-	if (!pairs || pairs.length === 0) return '';
-	const totalBags = pairs.reduce((s, tr) => s + tr.half1.bags + (tr.half2 ? tr.half2.bags : 0), 0);
+function calcBatchesRequired(products, russianTrolley, polonyPlan) {
+	const req = {};
+	req['RUSSIAN'] = (russianTrolley && russianTrolley.batchesNeeded) || 0;
+
+	const r05 = products.find(p => p.code === 'R05');
+	req['ECONO RUSSIAN'] = r05 ? (batchesNeeded(r05) || 0) : 0;
+	const r06 = products.find(p => p.code === 'R06');
+	req['CHEESE RUSSIAN'] = r06 ? (batchesNeeded(r06) || 0) : 0;
+	const r07 = products.find(p => p.code === 'R07');
+	req['BABALAS RUSSIAN'] = r07 ? (batchesNeeded(r07) || 0) : 0;
+
+	const v01 = products.find(p => p.code === 'V01');
+	const v01info = v01 ? viennaBatchInfo(v01) : { fullBatches: 0, hasHalf: false };
+	req['VIENNA Full'] = v01info.fullBatches;
+	req['VIENNA Half'] = v01info.hasHalf ? 1 : 0;
+
+	const v02 = products.find(p => p.code === 'V02');
+	const v02info = v02 ? viennaBatchInfo(v02) : { fullBatches: 0, hasHalf: false };
+	req['CHEESE VIENNA Full'] = v02info.fullBatches;
+	req['CHEESE VIENNA Half'] = v02info.hasHalf ? 1 : 0;
+
+	let polonyCasings = 0;
+	POLONY_CODES.forEach(c => { if (polonyPlan[c]) polonyCasings += polonyPlan[c].casingsToMake; });
+	req['POLONY'] = polonyCasings;
+
+	return req;
+}
+
+function buildDefaultTrolleyAssignments(req) {
+	// Auto-plan only pairs within compatible groups — never mixes across them
+	const RUSSIAN_FAMILY = ['RUSSIAN', 'ECONO RUSSIAN', 'CHEESE RUSSIAN', 'BABALAS RUSSIAN'];
+	const VIENNA_FAMILY = ['VIENNA Full', 'VIENNA Half', 'CHEESE VIENNA Full', 'CHEESE VIENNA Half'];
+
+	function buildUnits(labels) {
+		const units = [];
+		labels.forEach(label => {
+			const count = req[label] || 0;
+			for (let i = 0; i < count; i++) units.push(label);
+		});
+		return units;
+	}
+	function pairUnits(units) {
+		const pairs = [];
+		for (let i = 0; i < units.length; i += 2) {
+			pairs.push({ half1: units[i] || '', half2: units[i + 1] || '' });
+		}
+		return pairs;
+	}
+
+	const russianUnits = buildUnits(RUSSIAN_FAMILY);
+	const viennaUnits = buildUnits(VIENNA_FAMILY);
+
+	// POLONY always takes a full trolley (both halves) — never shares with anything else
+	const polonyUnits = [];
+	const polonyCount = req['POLONY'] || 0;
+	for (let i = 0; i < polonyCount; i++) { polonyUnits.push('POLONY'); polonyUnits.push('POLONY'); }
+
+	return [...pairUnits(russianUnits), ...pairUnits(viennaUnits), ...pairUnits(polonyUnits)];
+}
+
+function trolleyHalfSelectHTML(rowIdx, halfKey, currentVal) {
+	const options = [''].concat(TROLLEY_BATCH_LABELS);
+	return `<select class="tp-select" onchange="updateTrolleyHalf(${rowIdx}, '${halfKey}', this.value)">
+		${options.map(o => `<option value="${o}" ${o === currentVal ? 'selected' : ''}>${o || '— empty —'}</option>`).join('')}
+	</select>`;
+}
+
+function trolleyBagsLabel(label) {
+	if (!label) return '';
+	if (label === 'POLONY') return 'casing cook';
+	return `${trolleyBatchBags(label)} bags`;
+}
+
+function buildTrolleyPlanCardHTML(req, assignments) {
+	const reqRows = TROLLEY_BATCH_LABELS.filter(l => (req[l] || 0) > 0)
+		.map(l => `<div class="tp-req-row"><span>${l}</span><b>${req[l]}</b></div>`).join('');
+	const reqSection = `
+		<div class="tp-req-section">
+			<div class="tp-req-title">Batches required to cook today</div>
+			${reqRows || '<div class="tp-req-row"><span>Nothing new to cook</span></div>'}
+		</div>
+	`;
+
+	const rows = assignments.map((a, i) => {
+		const b1 = trolleyBatchBags(a.half1);
+		const b2 = trolleyBatchBags(a.half2);
+		const hasPolony = a.half1 === 'POLONY' || a.half2 === 'POLONY';
+		const totalDisplay = hasPolony ? '—' : ((b1 || 0) + (b2 || 0));
+		return `
+			<div class="tp-row">
+				<div class="tp-num">${i + 1}</div>
+				<div class="tp-half">${trolleyHalfSelectHTML(i, 'half1', a.half1)}<span class="tp-bags">${trolleyBagsLabel(a.half1)}</span></div>
+				<div class="tp-half">${trolleyHalfSelectHTML(i, 'half2', a.half2)}<span class="tp-bags">${trolleyBagsLabel(a.half2)}</span></div>
+				<div class="tp-total">${totalDisplay}</div>
+				<div class="tp-remove no-print" onclick="removeTrolleyRow(${i})" title="Remove trolley">✕</div>
+			</div>
+		`;
+	}).join('');
+
 	return `
-		<div class="trolleyplan-title">🛒 Production Trolley Plan — Russian / Vienna batches</div>
+		<div class="trolleyplan-title">🛒 Production Trolley Plan — editable</div>
+		${reqSection}
 		<div class="tp-header">
 			<div>#</div><div>HALF 1</div><div>HALF 2</div><div>BAGS</div>
 		</div>
-		${pairs.map((tr, i) => `
-			<div class="tp-row">
-				<div class="tp-num">${i + 1}</div>
-				<div class="tp-half">${tr.half1.label}<span class="tp-bags">${tr.half1.bags}</span></div>
-				<div class="tp-half">${tr.half2 ? `${tr.half2.label}<span class="tp-bags">${tr.half2.bags}</span>` : '<span class="tp-empty">— open —</span>'}</div>
-				<div class="tp-total">${tr.half1.bags + (tr.half2 ? tr.half2.bags : 0)}</div>
-			</div>
-		`).join('')}
-		<div class="tp-totals">${pairs.length} trolleys needed · ${totalBags.toLocaleString()} bags total</div>
+		${rows || '<div class="tp-req-row"><span>No trolleys yet — add one below</span></div>'}
+		<div class="tp-actions no-print">
+			<button class="tp-btn" onclick="addTrolleyRow()">+ Add Trolley</button>
+			<button class="tp-btn tp-btn-reset" onclick="resetTrolleyPlan()">↺ Reset to Auto-Plan</button>
+			<button class="tp-btn tp-btn-save" onclick="saveTrolleyLayout()">💾 Save Layout</button>
+		</div>
 	`;
+}
+
+function refreshTrolleyPlanCard() {
+	state.batchesRequired = calcBatchesRequired(state.products, state.russianTrolley, state.polonyPlan);
+	const tpEl = document.getElementById('trolleyPlanCard');
+	if (tpEl) tpEl.innerHTML = buildTrolleyPlanCardHTML(state.batchesRequired, state.trolleyAssignments);
+}
+
+function updateTrolleyHalf(rowIdx, halfKey, value) {
+	if (!state.trolleyAssignments[rowIdx]) return;
+	state.trolleyAssignments[rowIdx][halfKey] = value;
+	refreshTrolleyPlanCard();
+}
+
+function addTrolleyRow() {
+	state.trolleyAssignments.push({ half1: '', half2: '' });
+	refreshTrolleyPlanCard();
+}
+
+function removeTrolleyRow(rowIdx) {
+	state.trolleyAssignments.splice(rowIdx, 1);
+	refreshTrolleyPlanCard();
+}
+
+function resetTrolleyPlan() {
+	state.trolleyAssignments = buildDefaultTrolleyAssignments(state.batchesRequired);
+	refreshTrolleyPlanCard();
+}
+
+async function loadSavedTrolleyPlan() {
+	try {
+		const url = `${SCRIPT_URL}?action=getTrolleyPlan&date=${state.date}&sheetId=${NEW_SHEET_ID}`;
+		const resp = await fetch(url);
+		const data = await resp.json();
+		if (data.status === 'ok' && data.found && Array.isArray(data.assignments) && data.assignments.length > 0) {
+			state.trolleyAssignments = data.assignments;
+		}
+	} catch (e) {
+		// Non-fatal — falls back to the freshly-built auto-plan
+	}
+}
+
+async function saveTrolleyLayout() {
+	showToast('💾 Saving trolley layout...', '');
+	try {
+		const resp = await fetch(SCRIPT_URL, {
+			method: 'POST',
+			headers: {'Content-Type': 'text/plain'},
+			body: JSON.stringify({
+				action: 'saveTrolleyPlan',
+				sheetId: NEW_SHEET_ID,
+				date: state.date,
+				assignments: state.trolleyAssignments
+			})
+		});
+		const data = await resp.json();
+		if (data.status === 'ok') {
+			showToast('✅ Trolley layout saved', 'success');
+		} else {
+			showToast('⚠️ ' + (data.message || 'Save failed'), 'error');
+		}
+	} catch (e) {
+		showToast('⚠️ Network error — try again', 'error');
+	}
 }
 
 function updateStockField(idx, field, val) {
@@ -1090,12 +1274,8 @@ function updateStockField(idx, field, val) {
 	const totalProduceEl = document.getElementById('totalProduceVal');
 	if (totalProduceEl) totalProduceEl.textContent = totalProduce;
 
-	// Any product feeding the Trolley Plan (Russians R01-R08, Vienna V01/V02) needs a refresh
-	if (TROLLEY_SCOPE_CODES.includes(state.products[idx].code)) {
-		state.trolleyPairs = calcTrolleyPairs(state.products, state.russianTrolley);
-		const tpEl = document.getElementById('trolleyPlanCard');
-		if (tpEl) tpEl.innerHTML = buildTrolleyPlanHTML(state.trolleyPairs);
-	}
+	// Batches Required summary always stays live; manual trolley assignments are preserved
+	refreshTrolleyPlanCard();
 }
 
 function updateRussianColdroomBatches(val) {
@@ -1127,10 +1307,8 @@ function updateRussianColdroomBatches(val) {
 	const totalProduceEl = document.getElementById('totalProduceVal');
 	if (totalProduceEl) totalProduceEl.textContent = totalProduce;
 
-	// Trolley Plan also depends on the Russians pool's batch count
-	state.trolleyPairs = calcTrolleyPairs(state.products, state.russianTrolley);
-	const tpEl = document.getElementById('trolleyPlanCard');
-	if (tpEl) tpEl.innerHTML = buildTrolleyPlanHTML(state.trolleyPairs);
+	// Trolley Plan Batches Required summary also depends on the Russians pool's batch count
+	refreshTrolleyPlanCard();
 }
 
 async function saveStockLevels() {
