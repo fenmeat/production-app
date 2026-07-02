@@ -760,17 +760,22 @@ async function loadPlanForDate() {
 			code: p.code, name: p.name, plannedQty: p.qty, actualQty: p.qty, stockQty: 0, coldroomQty: 0, bagsPerBatch: 0, produceOverride: null
 		}));
 
-		// Pull current stock levels, batch sizes, and any already-saved actuals for this date
+		// Pull current stock levels and batch sizes first — Produce depends on these
 		await loadStockLevels();
 		await loadBagsPerBatch();
-		await loadActualsForDate();
 
 		state.russianTrolley = calcRussiansTrolley(state.products, state.russianColdroomBatches);
 		state.polonyPlan = calcPolonyPlan(state.products);
 		state.batchesRequired = calcBatchesRequired(state.products, state.russianTrolley, state.polonyPlan);
 		state.trolleyAssignments = buildDefaultTrolleyAssignments(state.batchesRequired);
 		state.polonyTrolleys = buildDefaultPolonyTrolleys(state.polonyPlan);
-		await loadSavedTrolleyPlan(); // overrides both trolleyAssignments and polonyTrolleys with a saved layout, if one exists
+		await loadSavedTrolleyPlan(); // overrides trolleyAssignments, polonyTrolleys, and produceOverride
+
+		// Only now is displayProduce(p) meaningful for every product (Stock/Coldroom loaded,
+		// Trolley/Polony plans computed, any saved Produce override restored) — so actuals
+		// load last, defaulting each row's Actual to what was actually planned to be produced
+		// (not the raw sales forecast) unless a real actuals entry was already saved for this date.
+		await loadActualsForDate();
 
 		updateContextBar();
 		render();
@@ -834,15 +839,13 @@ async function loadActualsForDate() {
 		const url = `${SCRIPT_URL}?action=getProductionLog&date=${state.date}&sheetId=${NEW_SHEET_ID}`;
 		const resp = await fetch(url);
 		const data = await resp.json();
+		const savedByCode = {};
 		if (data.status === 'ok' && data.found) {
-			const savedByCode = {};
 			data.products.forEach(p => { savedByCode[p.code] = p.actualQty; });
-			state.products.forEach(p => {
-				if (savedByCode[p.code] !== undefined) {
-					p.actualQty = savedByCode[p.code];
-				}
-			});
 		}
+		state.products.forEach(p => {
+			p.actualQty = savedByCode[p.code] !== undefined ? savedByCode[p.code] : displayProduce(p);
+		});
 	} catch (e) {
 		// Non-fatal — plan still shows, actuals just won't be pre-filled
 	}
@@ -1015,20 +1018,32 @@ function calcRussiansTrolley(products, coldroomBatches) {
 	const newLoose = batchesNeededCount * RUSSIAN_BATCH_YIELD;
 	const looseAvailable = coldroomLoose + newLoose;
 
+	// Every size gets at least enough whole bags to cover its own need — never shortchanged
+	// just because it happens to be processed last. (Old approach: R6/R5/R4 rounded up
+	// individually, then R4 only got "whatever's left" — the cumulative rounding from the
+	// other three could eat into R4's own share, showing a false shortage even though the
+	// pool overall always has enough.)
 	const suggestedBags = {};
-	let allocated = 0;
-	// R6, R5, R4 get a proportional share of the pool, rounded up
-	['R01', 'R02', 'R03'].forEach(code => {
-		const share = totalLoose > 0 ? needLoose[code] / totalLoose : 0;
-		const allocLoose = looseAvailable * share;
-		const bags = Math.ceil(allocLoose / RUSSIAN_PER_BAG[code]);
-		suggestedBags[code] = Math.max(0, bags);
-		allocated += suggestedBags[code] * RUSSIAN_PER_BAG[code];
+	RUSSIAN_CODES.forEach(code => {
+		suggestedBags[code] = needLoose[code] > 0 ? Math.ceil(needLoose[code] / RUSSIAN_PER_BAG[code]) : 0;
 	});
-	// R3 absorbs whatever's left, in whole bags
-	const remainingForR04 = Math.max(0, looseAvailable - allocated);
-	suggestedBags['R04'] = Math.floor(remainingForR04 / RUSSIAN_PER_BAG['R04']);
-	allocated += suggestedBags['R04'] * RUSSIAN_PER_BAG['R04'];
+	let allocated = RUSSIAN_CODES.reduce((s, code) => s + suggestedBags[code] * RUSSIAN_PER_BAG[code], 0);
+
+	// Rare edge case: rounding every size up individually asks for slightly more loose than
+	// is actually available. Trim 1 bag at a time from the largest bag size first (frees the
+	// most loose per bag removed, so it takes the fewest trims and causes least disruption).
+	if (allocated > looseAvailable) {
+		const byBagSizeDesc = [...RUSSIAN_CODES].sort((a, b) => RUSSIAN_PER_BAG[b] - RUSSIAN_PER_BAG[a]);
+		let over = allocated - looseAvailable;
+		for (const code of byBagSizeDesc) {
+			while (over > 0 && suggestedBags[code] > 0) {
+				suggestedBags[code] -= 1;
+				allocated -= RUSSIAN_PER_BAG[code];
+				over -= RUSSIAN_PER_BAG[code];
+			}
+			if (over <= 0) break;
+		}
+	}
 
 	const leftoverLoose = Math.max(0, looseAvailable - allocated);
 
@@ -1305,17 +1320,26 @@ function batchLabel(p) {
 		return `${plan.casingsToMake} casing${plan.casingsToMake > 1 ? 's' : ''} to cook`;
 	}
 	if (VIENNA_CODES.includes(p.code)) {
-		const info = viennaBatchInfo(p);
-		if (info.fullBatches === 0 && !info.hasHalf) return '';
+		const fullSize = p.bagsPerBatch || 0;
+		if (fullSize <= 0) return '';
+		const halfSize = Math.round(fullSize / 2);
+		const bags = displayProduce(p); // respects a manual override
+		if (bags === 0) return '';
+		const fullBatches = Math.floor(bags / fullSize);
+		const remainder = bags - (fullBatches * fullSize);
+		const hasHalf = remainder >= Math.round(halfSize * 0.75); // treat a near-half remainder as "+half"
 		const parts = [];
-		if (info.fullBatches > 0) parts.push(`×${info.fullBatches} full`);
-		if (info.hasHalf) parts.push('+half');
-		return parts.join(' ');
+		if (fullBatches > 0) parts.push(`×${fullBatches} full`);
+		if (hasHalf) parts.push('+half');
+		return parts.join(' ') || '';
 	}
 	if (SKIP_BATCH_CODES.includes(p.code)) return '';
-	const batches = batchesNeeded(p);
-	if (batches === null || batches === 0) return '';
-	return `×${batches} batch${batches > 1 ? 'es' : ''}`;
+	if (p.bagsPerBatch > 0) {
+		const batches = Math.round(displayProduce(p) / p.bagsPerBatch); // respects a manual override
+		if (batches === 0) return '';
+		return `×${batches} batch${batches > 1 ? 'es' : ''}`;
+	}
+	return '';
 }
 
 // POLONY is selectable here for Alex's own reference/bookkeeping, but is NOT part of the
@@ -1672,7 +1696,7 @@ async function saveAll() {
 }
 
 function renderActuals() {
-	const totalPlanned = state.products.reduce((s, p) => s + p.plannedQty, 0);
+	const totalPlanned = state.products.reduce((s, p) => s + displayProduce(p), 0);
 	const totalActual = state.products.reduce((s, p) => s + (p.actualQty || 0), 0);
 
 	const html = `
@@ -1697,7 +1721,7 @@ function renderActuals() {
 					<div class="product-name">${p.name}</div>
 					<div class="product-code">${p.code}</div>
 				</div>
-				<div class="plan-qty">${p.plannedQty}</div>
+				<div class="plan-qty">${displayProduce(p)}</div>
 				<div>
 					<input type="number" class="qty-input"
 						id="actual_${i}" value="${p.actualQty}" min="0"
