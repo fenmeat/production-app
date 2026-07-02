@@ -149,7 +149,7 @@ body {
 	letter-spacing: 0.4px;
 }
 .product-header.actuals-mode { grid-template-columns: 1fr 70px 80px; }
-.product-header.plan-mode { grid-template-columns: 1fr 64px 64px 70px; }
+.product-header.plan-mode { grid-template-columns: 1fr 58px 58px 58px 58px; }
 
 .product-row {
 	display: grid;
@@ -161,7 +161,7 @@ body {
 	border-bottom: 1px solid var(--border);
 }
 .product-row.actuals-mode { grid-template-columns: 1fr 70px 80px; }
-.product-row.plan-mode { grid-template-columns: 1fr 64px 64px 70px; }
+.product-row.plan-mode { grid-template-columns: 1fr 58px 58px 58px 58px; }
 .product-row:nth-child(even) { background: #fafafa; }
 
 .product-name { font-size: 14px; font-weight: 600; }
@@ -190,6 +190,13 @@ body {
 	font-weight: 700;
 	color: var(--copper);
 }
+.produce-input {
+	text-align: center;
+	font-size: 16px;
+	font-weight: 700;
+	color: var(--copper);
+	border-color: var(--copper);
+}
 .produce-batches {
 	text-align: center;
 	font-size: 10px;
@@ -197,6 +204,15 @@ body {
 	font-weight: 600;
 	margin-top: 1px;
 }
+
+.surplus-qty {
+	text-align: center;
+	font-size: 16px;
+	font-weight: 700;
+}
+.surplus-pos { color: var(--green); }
+.surplus-neg { color: var(--red); }
+.surplus-zero { color: var(--muted); }
 
 .empty-state {
 	text-align: center;
@@ -741,7 +757,7 @@ async function loadPlanForDate() {
 		state.period = data.period || 'NORMAL';
 		state.sourceByRoute = data.sourceByRoute || {};
 		state.products = (data.products || []).map(p => ({
-			code: p.code, name: p.name, plannedQty: p.qty, actualQty: p.qty, stockQty: 0, coldroomQty: 0, bagsPerBatch: 0
+			code: p.code, name: p.name, plannedQty: p.qty, actualQty: p.qty, stockQty: 0, coldroomQty: 0, bagsPerBatch: 0, produceOverride: null
 		}));
 
 		// Pull current stock levels, batch sizes, and any already-saved actuals for this date
@@ -871,7 +887,8 @@ function render() {
 function renderPlan() {
 	const totalForecast = state.products.reduce((s, p) => s + p.plannedQty, 0);
 	const totalStock = state.products.reduce((s, p) => s + (p.stockQty || 0), 0);
-	const totalProduce = state.products.reduce((s, p) => s + produceQty(p), 0);
+	const totalProduce = state.products.reduce((s, p) => s + displayProduce(p), 0);
+	const totalSurplus = state.products.reduce((s, p) => s + surplusQty(p), 0);
 
 	const rt = state.russianTrolley;
 	const trolleyCardInner = buildTrolleyCardHTML(rt, state.russianColdroomBatches);
@@ -900,17 +917,24 @@ function renderPlan() {
 				<div class="summary-val" id="totalProduceVal">${totalProduce}</div>
 				<div class="summary-label">To Produce</div>
 			</div>
+			<div class="summary-item">
+				<div class="summary-val ${totalSurplus < 0 ? 'surplus-neg' : ''}" id="totalSurplusVal">${totalSurplus > 0 ? '+' : ''}${totalSurplus}</div>
+				<div class="summary-label">Surplus</div>
+			</div>
 		</div>
 		<div class="product-header plan-mode">
 			<div>PRODUCT</div>
 			<div style="text-align:center">FORECAST</div>
 			<div style="text-align:center">STOCK</div>
 			<div style="text-align:center">PRODUCE</div>
+			<div style="text-align:center">SURPLUS</div>
 		</div>
 		${state.products.map((p, i) => {
 			const isPolony = POLONY_CODES.includes(p.code);
 			const hasColdroom = COLDROOM_SCOPE_CODES.includes(p.code);
 			const coldroomUnit = isPolony ? 'casings' : 'batches';
+			const surplus = surplusQty(p);
+			const surplusClass = surplus < 0 ? 'surplus-neg' : (surplus > 0 ? 'surplus-pos' : 'surplus-zero');
 			return `
 			<div class="product-row plan-mode">
 				<div>
@@ -933,9 +957,13 @@ function renderPlan() {
 					` : ''}
 				</div>
 				<div>
-					<div class="produce-qty" id="produce_${i}">${produceQty(p)}</div>
+					<input type="number" class="qty-input produce-input"
+						id="produce_${i}" value="${displayProduce(p)}" min="0"
+						oninput="updateProduceOverride(${i}, this.value)"
+						onfocus="this.select()">
 					<div class="produce-batches" id="batches_${i}">${batchLabel(p)}</div>
 				</div>
+				<div class="surplus-qty ${surplusClass}" id="surplus_${i}">${surplus > 0 ? '+' : ''}${surplus}</div>
 			</div>
 		`;}).join('')}
 		<div class="action-bar no-print">
@@ -1232,6 +1260,41 @@ function produceQty(p) {
 	return batches * (p.bagsPerBatch || 0);
 }
 
+// The number actually shown/used everywhere: Alex's manual override if he's set one,
+// otherwise the calculated suggestion. produceQty(p) itself is left untouched so the
+// Trolley Plan / Polony Trolley Builder (which compute their own batch counts directly,
+// not from this) are never affected by an override here.
+function displayProduce(p) {
+	return (p.produceOverride !== null && p.produceOverride !== undefined) ? p.produceOverride : produceQty(p);
+}
+
+function surplusQty(p) {
+	return displayProduce(p) - rawNeed(p);
+}
+
+function updateProduceOverride(idx, val) {
+	const p = state.products[idx];
+	p.produceOverride = (val === '' || val === null) ? null : (parseInt(val) || 0);
+
+	const surplusEl = document.getElementById(`surplus_${idx}`);
+	if (surplusEl) {
+		const s = surplusQty(p);
+		surplusEl.textContent = (s > 0 ? '+' : '') + s;
+		surplusEl.className = 'surplus-qty ' + (s < 0 ? 'surplus-neg' : (s > 0 ? 'surplus-pos' : 'surplus-zero'));
+	}
+
+	const totalProduce = state.products.reduce((s, pr) => s + displayProduce(pr), 0);
+	const totalProduceEl = document.getElementById('totalProduceVal');
+	if (totalProduceEl) totalProduceEl.textContent = totalProduce;
+
+	const totalSurplus = state.products.reduce((s, pr) => s + surplusQty(pr), 0);
+	const totalSurplusEl = document.getElementById('totalSurplusVal');
+	if (totalSurplusEl) {
+		totalSurplusEl.textContent = (totalSurplus > 0 ? '+' : '') + totalSurplus;
+		totalSurplusEl.className = 'summary-val ' + (totalSurplus < 0 ? 'surplus-neg' : '');
+	}
+}
+
 function batchLabel(p) {
 	if (RUSSIAN_CODES.includes(p.code)) {
 		return '🌭 pooled batch';
@@ -1255,9 +1318,10 @@ function batchLabel(p) {
 	return `×${batches} batch${batches > 1 ? 'es' : ''}`;
 }
 
-// POLONY removed from here — it now has its own dedicated Polony Trolley Builder (in the Polony Pack Plan card),
-// since Polony trolleys need per-size casing counts (max 10 casings/trolley) rather than a generic "casing cook".
-const TROLLEY_BATCH_LABELS = ['RUSSIAN', 'ECONO RUSSIAN', 'CHEESE RUSSIAN', 'BABALAS RUSSIAN', 'VIENNA Full', 'VIENNA Half', 'CHEESE VIENNA Full', 'CHEESE VIENNA Half'];
+// POLONY is selectable here for Alex's own reference/bookkeeping, but is NOT part of the
+// auto-plan generation or the Batches Required count — the Polony Trolley Builder (in the
+// Polony Pack Plan card) is the authoritative place for casing counts per size.
+const TROLLEY_BATCH_LABELS = ['RUSSIAN', 'ECONO RUSSIAN', 'CHEESE RUSSIAN', 'BABALAS RUSSIAN', 'VIENNA Full', 'VIENNA Half', 'CHEESE VIENNA Full', 'CHEESE VIENNA Half', 'POLONY'];
 const POLONY_TROLLEY_CAPACITY = 10;
 const MAX_TROLLEYS_PER_DAY = 8;
 
@@ -1440,37 +1504,16 @@ async function loadSavedTrolleyPlan() {
 				if (Array.isArray(data.assignments.polonyTrolleys)) {
 					state.polonyTrolleys = data.assignments.polonyTrolleys;
 				}
+				if (data.assignments.produceOverrides && typeof data.assignments.produceOverrides === 'object') {
+					const overrides = data.assignments.produceOverrides;
+					state.products.forEach(p => {
+						if (overrides[p.code] !== undefined) p.produceOverride = overrides[p.code];
+					});
+				}
 			}
 		}
 	} catch (e) {
 		// Non-fatal — falls back to the freshly-built auto-plan
-	}
-}
-
-async function saveTrolleyLayout() {
-	showToast('💾 Saving trolley layout...', '');
-	try {
-		const resp = await fetch(SCRIPT_URL, {
-			method: 'POST',
-			headers: {'Content-Type': 'text/plain'},
-			body: JSON.stringify({
-				action: 'saveTrolleyPlan',
-				sheetId: NEW_SHEET_ID,
-				date: state.date,
-				assignments: {
-					trolleyAssignments: state.trolleyAssignments,
-					polonyTrolleys: state.polonyTrolleys
-				}
-			})
-		});
-		const data = await resp.json();
-		if (data.status === 'ok') {
-			showToast('✅ Trolley layout saved', 'success');
-		} else {
-			showToast('⚠️ ' + (data.message || 'Save failed'), 'error');
-		}
-	} catch (e) {
-		showToast('⚠️ Network error — try again', 'error');
 	}
 }
 
@@ -1484,45 +1527,54 @@ function updateStockField(idx, field, val) {
 		if (trolleyEl) {
 			trolleyEl.innerHTML = buildTrolleyCardHTML(state.russianTrolley, state.russianColdroomBatches);
 		}
-		// Update all four Russian produce/batch cells
+		// Update all four Russian produce/batch/surplus cells
 		state.products.forEach((p, i) => {
-			if (RUSSIAN_CODES.includes(p.code)) {
-				const produceEl = document.getElementById(`produce_${i}`);
-				if (produceEl) produceEl.textContent = produceQty(p);
-				const batchesEl = document.getElementById(`batches_${i}`);
-				if (batchesEl) batchesEl.textContent = batchLabel(p);
-			}
+			if (RUSSIAN_CODES.includes(p.code)) refreshProduceRow(i);
 		});
 	} else if (POLONY_CODES.includes(state.products[idx].code)) {
 		// Recalculate polony plan and refresh the polony card + this product's row
 		state.polonyPlan = calcPolonyPlan(state.products);
 		const polonyEl = document.getElementById('polonyCard');
 		if (polonyEl) polonyEl.innerHTML = buildPolonyCardHTML(state.polonyPlan);
-		// Update produce/batch cells for all polony rows
+		// Update produce/batch/surplus cells for all polony rows
 		state.products.forEach((p, i) => {
-			if (POLONY_CODES.includes(p.code)) {
-				const produceEl = document.getElementById(`produce_${i}`);
-				if (produceEl) produceEl.textContent = produceQty(p);
-				const batchesEl = document.getElementById(`batches_${i}`);
-				if (batchesEl) batchesEl.textContent = batchLabel(p);
-			}
+			if (POLONY_CODES.includes(p.code)) refreshProduceRow(i);
 		});
 	} else {
-		const produceEl = document.getElementById(`produce_${idx}`);
-		if (produceEl) produceEl.textContent = produceQty(state.products[idx]);
-		const batchesEl = document.getElementById(`batches_${idx}`);
-		if (batchesEl) batchesEl.textContent = batchLabel(state.products[idx]);
+		refreshProduceRow(idx);
 	}
 
 	const totalStock = state.products.reduce((s, p) => s + (p.stockQty || 0), 0);
-	const totalProduce = state.products.reduce((s, p) => s + produceQty(p), 0);
+	const totalProduce = state.products.reduce((s, p) => s + displayProduce(p), 0);
 	const totalStockEl = document.querySelectorAll('.summary-val')[1];
 	if (totalStockEl) totalStockEl.textContent = totalStock;
 	const totalProduceEl = document.getElementById('totalProduceVal');
 	if (totalProduceEl) totalProduceEl.textContent = totalProduce;
+	const totalSurplus = state.products.reduce((s, p) => s + surplusQty(p), 0);
+	const totalSurplusEl = document.getElementById('totalSurplusVal');
+	if (totalSurplusEl) {
+		totalSurplusEl.textContent = (totalSurplus > 0 ? '+' : '') + totalSurplus;
+		totalSurplusEl.className = 'summary-val ' + (totalSurplus < 0 ? 'surplus-neg' : '');
+	}
 
 	// Batches Required summary always stays live; manual trolley assignments are preserved
 	refreshTrolleyPlanCard();
+}
+
+// Refreshes one row's Produce input (only if Alex hasn't manually overridden it), batch
+// label, and Surplus cell — used after any Stock/Coldroom change.
+function refreshProduceRow(idx) {
+	const p = state.products[idx];
+	const produceEl = document.getElementById(`produce_${idx}`);
+	if (produceEl) produceEl.value = displayProduce(p);
+	const batchesEl = document.getElementById(`batches_${idx}`);
+	if (batchesEl) batchesEl.textContent = batchLabel(p);
+	const surplusEl = document.getElementById(`surplus_${idx}`);
+	if (surplusEl) {
+		const s = surplusQty(p);
+		surplusEl.textContent = (s > 0 ? '+' : '') + s;
+		surplusEl.className = 'surplus-qty ' + (s < 0 ? 'surplus-neg' : (s > 0 ? 'surplus-pos' : 'surplus-zero'));
+	}
 }
 
 function updateRussianColdroomBatches(val) {
@@ -1540,45 +1592,79 @@ function updateRussianColdroomBatches(val) {
 		}
 	}
 
-	// R01-R04 produce/batch cells depend on the trolley allocation
+	// R01-R04 produce/batch/surplus cells depend on the trolley allocation
 	state.products.forEach((p, i) => {
-		if (RUSSIAN_CODES.includes(p.code)) {
-			const produceEl = document.getElementById(`produce_${i}`);
-			if (produceEl) produceEl.textContent = produceQty(p);
-			const batchesEl = document.getElementById(`batches_${i}`);
-			if (batchesEl) batchesEl.textContent = batchLabel(p);
-		}
+		if (RUSSIAN_CODES.includes(p.code)) refreshProduceRow(i);
 	});
 
-	const totalProduce = state.products.reduce((s, p) => s + produceQty(p), 0);
+	const totalProduce = state.products.reduce((s, p) => s + displayProduce(p), 0);
 	const totalProduceEl = document.getElementById('totalProduceVal');
 	if (totalProduceEl) totalProduceEl.textContent = totalProduce;
+	const totalSurplus = state.products.reduce((s, p) => s + surplusQty(p), 0);
+	const totalSurplusEl = document.getElementById('totalSurplusVal');
+	if (totalSurplusEl) {
+		totalSurplusEl.textContent = (totalSurplus > 0 ? '+' : '') + totalSurplus;
+		totalSurplusEl.className = 'summary-val ' + (totalSurplus < 0 ? 'surplus-neg' : '');
+	}
 
 	// Trolley Plan Batches Required summary also depends on the Russians pool's batch count
 	refreshTrolleyPlanCard();
 }
 
-async function saveStockLevels() {
-	showToast('💾 Saving stock...', '');
+async function saveTrolleyLayout() {
+	await saveAll();
+}
 
-	const rows = state.products.map(p => ({ code: p.code, qty: p.stockQty || 0, coldroomQty: p.coldroomQty || 0 }));
-	rows.push({ code: 'RUSSIAN_TROLLEY', qty: 0, coldroomQty: state.russianColdroomBatches || 0 });
+async function saveStockLevels() {
+	await saveAll();
+}
+
+// Saves everything in one go: Stock/Coldroom levels (STOCK sheet) AND the date-specific
+// layout — Trolley Plan assignments, Polony Trolley Builder, and Produce overrides
+// (TROLLEY_PLAN_LOG, keyed by date). Both Save buttons call this, so either one saves
+// everything — no need to remember which button covers what.
+async function saveAll() {
+	showToast('💾 Saving...', '');
+
+	const stockRows = state.products.map(p => ({ code: p.code, qty: p.stockQty || 0, coldroomQty: p.coldroomQty || 0 }));
+	stockRows.push({ code: 'RUSSIAN_TROLLEY', qty: 0, coldroomQty: state.russianColdroomBatches || 0 });
+
+	const produceOverrides = {};
+	state.products.forEach(p => {
+		if (p.produceOverride !== null && p.produceOverride !== undefined) {
+			produceOverrides[p.code] = p.produceOverride;
+		}
+	});
 
 	try {
-		const resp = await fetch(SCRIPT_URL, {
-			method: 'POST',
-			headers: {'Content-Type': 'text/plain'},
-			body: JSON.stringify({
-				action: 'updateStockLevels',
-				sheetId: NEW_SHEET_ID,
-				rows: rows
+		const [stockResp, layoutResp] = await Promise.all([
+			fetch(SCRIPT_URL, {
+				method: 'POST',
+				headers: {'Content-Type': 'text/plain'},
+				body: JSON.stringify({ action: 'updateStockLevels', sheetId: NEW_SHEET_ID, rows: stockRows })
+			}),
+			fetch(SCRIPT_URL, {
+				method: 'POST',
+				headers: {'Content-Type': 'text/plain'},
+				body: JSON.stringify({
+					action: 'saveTrolleyPlan',
+					sheetId: NEW_SHEET_ID,
+					date: state.date,
+					assignments: {
+						trolleyAssignments: state.trolleyAssignments,
+						polonyTrolleys: state.polonyTrolleys,
+						produceOverrides: produceOverrides
+					}
+				})
 			})
-		});
-		const data = await resp.json();
-		if (data.status === 'ok') {
-			showToast(`✅ Stock levels saved`, 'success');
+		]);
+		const stockData = await stockResp.json();
+		const layoutData = await layoutResp.json();
+
+		if (stockData.status === 'ok' && layoutData.status === 'ok') {
+			showToast('✅ Everything saved', 'success');
 		} else {
-			showToast('⚠️ ' + (data.message || 'Save failed'), 'error');
+			showToast('⚠️ ' + (stockData.message || layoutData.message || 'Some items failed to save'), 'error');
 		}
 	} catch (e) {
 		showToast('⚠️ Network error — try again', 'error');
