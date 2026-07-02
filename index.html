@@ -148,7 +148,7 @@ body {
 	text-transform: uppercase;
 	letter-spacing: 0.4px;
 }
-.product-header.actuals-mode { grid-template-columns: 1fr 70px 80px; }
+.product-header.actuals-mode { grid-template-columns: 1fr 60px 70px 60px; }
 .product-header.plan-mode { grid-template-columns: 1fr 58px 58px 58px 58px; }
 
 .product-row {
@@ -160,7 +160,7 @@ body {
 	background: white;
 	border-bottom: 1px solid var(--border);
 }
-.product-row.actuals-mode { grid-template-columns: 1fr 70px 80px; }
+.product-row.actuals-mode { grid-template-columns: 1fr 60px 70px 60px; }
 .product-row.plan-mode { grid-template-columns: 1fr 58px 58px 58px 58px; }
 .product-row:nth-child(even) { background: #fafafa; }
 
@@ -1698,6 +1698,7 @@ async function saveAll() {
 function renderActuals() {
 	const totalPlanned = state.products.reduce((s, p) => s + displayProduce(p), 0);
 	const totalActual = state.products.reduce((s, p) => s + (p.actualQty || 0), 0);
+	const totalActualSurplus = state.products.reduce((s, p) => s + actualSurplusQty(p), 0);
 
 	const html = `
 		<div class="summary-bar no-print">
@@ -1709,13 +1710,21 @@ function renderActuals() {
 				<div class="summary-val" id="totalActualVal">${totalActual}</div>
 				<div class="summary-label">Actual</div>
 			</div>
+			<div class="summary-item">
+				<div class="summary-val ${totalActualSurplus < 0 ? 'surplus-neg' : ''}" id="totalActualSurplusVal">${totalActualSurplus > 0 ? '+' : ''}${totalActualSurplus}</div>
+				<div class="summary-label">Surplus</div>
+			</div>
 		</div>
 		<div class="product-header actuals-mode">
 			<div>PRODUCT</div>
 			<div style="text-align:center">PLAN</div>
 			<div style="text-align:center">ACTUAL</div>
+			<div style="text-align:center">SURPLUS</div>
 		</div>
-		${state.products.map((p, i) => `
+		${state.products.map((p, i) => {
+			const s = actualSurplusQty(p);
+			const sClass = s < 0 ? 'surplus-neg' : (s > 0 ? 'surplus-pos' : 'surplus-zero');
+			return `
 			<div class="product-row actuals-mode">
 				<div>
 					<div class="product-name">${p.name}</div>
@@ -1728,8 +1737,9 @@ function renderActuals() {
 						oninput="updateActual(${i}, this.value)"
 						onfocus="this.select()">
 				</div>
+				<div class="surplus-qty ${sClass}" id="actualSurplus_${i}">${s > 0 ? '+' : ''}${s}</div>
 			</div>
-		`).join('')}
+		`;}).join('')}
 		<div class="action-bar no-print">
 			<button class="btn btn-save" onclick="saveActuals()">💾 Save Actuals</button>
 		</div>
@@ -1737,11 +1747,32 @@ function renderActuals() {
 	document.getElementById('mainContent').innerHTML = html;
 }
 
+// Actual Surplus = what was actually produced minus the net bags needed (same rawNeed used
+// on the Plan screen) — mirrors the Plan screen's Surplus column, but against Actual instead
+// of the (possibly overridden) Produce number.
+function actualSurplusQty(p) {
+	return (p.actualQty || 0) - rawNeed(p);
+}
+
 function updateActual(idx, val) {
 	state.products[idx].actualQty = parseInt(val) || 0;
 	const total = state.products.reduce((s, p) => s + (p.actualQty || 0), 0);
 	const totalEl = document.getElementById('totalActualVal');
 	if (totalEl) totalEl.textContent = total;
+
+	const s = actualSurplusQty(state.products[idx]);
+	const surplusEl = document.getElementById(`actualSurplus_${idx}`);
+	if (surplusEl) {
+		surplusEl.textContent = (s > 0 ? '+' : '') + s;
+		surplusEl.className = 'surplus-qty ' + (s < 0 ? 'surplus-neg' : (s > 0 ? 'surplus-pos' : 'surplus-zero'));
+	}
+
+	const totalSurplus = state.products.reduce((sum, p) => sum + actualSurplusQty(p), 0);
+	const totalSurplusEl = document.getElementById('totalActualSurplusVal');
+	if (totalSurplusEl) {
+		totalSurplusEl.textContent = (totalSurplus > 0 ? '+' : '') + totalSurplus;
+		totalSurplusEl.className = 'summary-val ' + (totalSurplus < 0 ? 'surplus-neg' : '');
+	}
 }
 
 async function saveActuals() {
