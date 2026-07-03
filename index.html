@@ -75,6 +75,38 @@ body {
 .mode-btn.active.plan { background: var(--blue); color: white; }
 .mode-btn.active.actuals { background: var(--copper); color: white; }
 
+.subtab-bar {
+	display: flex;
+	overflow-x: auto;
+	background: white;
+	border-bottom: 1px solid var(--border);
+	-webkit-overflow-scrolling: touch;
+}
+.subtab-btn {
+	flex: 1;
+	min-width: 76px;
+	padding: 12px 6px;
+	border: none;
+	background: white;
+	color: var(--muted);
+	font-size: 12px;
+	font-weight: 700;
+	letter-spacing: 0.3px;
+	border-bottom: 3px solid transparent;
+	cursor: pointer;
+	white-space: nowrap;
+}
+.subtab-btn.active {
+	color: var(--copper-dark);
+	border-bottom-color: var(--copper);
+	background: #FFF6EE;
+}
+
+.needs-input {
+	border-color: var(--orange) !important;
+	background: #FFF3E0 !important;
+}
+
 .context-bar {
 	background: #FFF6EE;
 	border-bottom: 1px solid var(--border);
@@ -814,6 +846,14 @@ body {
 	<button class="mode-btn actuals" id="btnActuals" onclick="setMode('actuals')">✅ LOG ACTUALS</button>
 </div>
 
+<div class="subtab-bar no-print" id="planSubTabBar">
+	<button class="subtab-btn active" id="subtabWors" onclick="setPlanSubTab('wors')">🌭 WORS</button>
+	<button class="subtab-btn" id="subtabRussians" onclick="setPlanSubTab('russians')">🥩 RUSSIANS</button>
+	<button class="subtab-btn" id="subtabVienna" onclick="setPlanSubTab('vienna')">🌡️ VIENNA</button>
+	<button class="subtab-btn" id="subtabPolony" onclick="setPlanSubTab('polony')">🧀 POLONY</button>
+	<button class="subtab-btn" id="subtabTrolleys" onclick="setPlanSubTab('trolleys')">🛒 TROLLEYS</button>
+</div>
+
 <div class="context-bar no-print" id="contextBar" style="display:none"></div>
 
 <div class="content" id="mainContent">
@@ -853,9 +893,20 @@ const SKIP_BATCH_CODES = ['W07']; // Patties: cut from frozen rolls, no batch ro
 const COLDROOM_SCOPE_CODES = ['R05', 'R06', 'R07', 'V01', 'V02', 'P02', 'P03', 'P04'];
 const COLDROOM_BATCH_CODES = ['R05', 'R06', 'R07', 'V01', 'V02']; // these convert batches->bags via bagsPerBatch
 
+// Which family a product code belongs to, used to split the PLAN screen into sub-tabs.
+// W-codes = Wors, R-codes = Russians (pooled R01-R04 and individual R05-R07), V-codes = Vienna,
+// P-codes = Polony (incl. P01 Pizza Toppings, offcuts only).
+function productFamily(code) {
+	if (code.startsWith('R')) return 'russians';
+	if (code.startsWith('V')) return 'vienna';
+	if (code.startsWith('P')) return 'polony';
+	return 'wors';
+}
+
 const state = {
 	date: '',
 	mode: 'plan', // 'plan' or 'actuals'
+	planSubTab: 'wors', // 'wors' | 'russians' | 'vienna' | 'polony' | 'trolleys'
 	routes: [],
 	period: '',
 	products: [], // {code, name, plannedQty, actualQty, stockQty}
@@ -903,7 +954,17 @@ function setMode(mode) {
 	state.mode = mode;
 	document.getElementById('btnPlan').classList.toggle('active', mode === 'plan');
 	document.getElementById('btnActuals').classList.toggle('active', mode === 'actuals');
+	document.getElementById('planSubTabBar').style.display = mode === 'plan' ? 'flex' : 'none';
 	render();
+}
+
+function setPlanSubTab(tab) {
+	state.planSubTab = tab;
+	['wors', 'russians', 'vienna', 'polony', 'trolleys'].forEach(t => {
+		document.getElementById('subtab' + t.charAt(0).toUpperCase() + t.slice(1))
+			.classList.toggle('active', t === tab);
+	});
+	renderPlan();
 }
 
 async function loadPlanForDate() {
@@ -1148,25 +1209,26 @@ function buildPrintLayout() {
 }
 
 function renderPlan() {
+	// Totals always reflect ALL products, regardless of which sub-tab is open, so the summary
+	// bar stays a full-picture overview even while a specific tab is being worked on.
 	const totalForecast = state.products.reduce((s, p) => s + p.plannedQty, 0);
 	const totalStock = state.products.reduce((s, p) => s + (p.stockQty || 0), 0);
 	const totalProduce = state.products.reduce((s, p) => s + displayProduce(p), 0);
 	const totalSurplus = state.products.reduce((s, p) => s + surplusQty(p), 0);
 
+	const tab = state.planSubTab;
+
 	const rt = state.russianTrolley;
 	const trolleyCardInner = buildTrolleyCardHTML(rt, state.russianColdroomBatches);
-	const trolleyCard = `<div class="trolley-card no-print" id="trolleyCard">${trolleyCardInner}</div>`;
+	const trolleyCard = tab === 'russians' ? `<div class="trolley-card no-print" id="trolleyCard">${trolleyCardInner}</div>` : '';
 
 	const polonyCardInner = buildPolonyCardHTML(state.polonyPlan);
-	const polonyCard = `<div class="polony-card no-print" id="polonyCard">${polonyCardInner}</div>`;
+	const polonyCard = tab === 'polony' ? `<div class="polony-card no-print" id="polonyCard">${polonyCardInner}</div>` : '';
 
 	const trolleyPlanInner = buildTrolleyPlanCardHTML(state.batchesRequired, state.trolleyAssignments);
-	const trolleyPlanCard = `<div class="trolleyplan-card no-print" id="trolleyPlanCard">${trolleyPlanInner}</div>`;
+	const trolleyPlanCard = tab === 'trolleys' ? `<div class="trolleyplan-card no-print" id="trolleyPlanCard">${trolleyPlanInner}</div>` : '';
 
-	const html = `
-		${trolleyCard}
-		${polonyCard}
-		${trolleyPlanCard}
+	const summaryBar = `
 		<div class="summary-bar no-print">
 			<div class="summary-item">
 				<div class="summary-val">${totalForecast}</div>
@@ -1185,6 +1247,11 @@ function renderPlan() {
 				<div class="summary-label">Surplus</div>
 			</div>
 		</div>
+	`;
+
+	// The Trolleys tab is about trolley assignments, not individual products, so it has no
+	// product table of its own — the trolleyPlanCard above is the whole tab.
+	const productTable = tab === 'trolleys' ? '' : `
 		<div class="product-header plan-mode">
 			<div>PRODUCT</div>
 			<div style="text-align:center">FORECAST</div>
@@ -1193,9 +1260,11 @@ function renderPlan() {
 			<div style="text-align:center">SURPLUS</div>
 		</div>
 		${state.products.map((p, i) => {
+			if (productFamily(p.code) !== tab) return '';
 			const isPolony = POLONY_CODES.includes(p.code);
 			const hasColdroom = COLDROOM_SCOPE_CODES.includes(p.code);
 			const coldroomUnit = isPolony ? 'casings' : 'batches';
+			const coldroomNeedsInput = hasColdroom && !(p.coldroomQty > 0);
 			const surplus = surplusQty(p);
 			const surplusClass = surplus < 0 ? 'surplus-neg' : (surplus > 0 ? 'surplus-pos' : 'surplus-zero');
 			return `
@@ -1212,7 +1281,7 @@ function renderPlan() {
 						onfocus="this.select()">
 					${isPolony ? `<div class="unit-hint">packed</div>` : ''}
 					${hasColdroom ? `
-						<input type="number" class="qty-input coldroom-input"
+						<input type="number" class="qty-input coldroom-input${coldroomNeedsInput ? ' needs-input' : ''}"
 							id="coldroom_${i}" value="${p.coldroomQty || 0}" min="0" step="0.5"
 							oninput="updateStockField(${i}, 'coldroomQty', this.value)"
 							onfocus="this.select()">
@@ -1229,6 +1298,14 @@ function renderPlan() {
 				<div class="surplus-qty ${surplusClass}" id="surplus_${i}">${surplus > 0 ? '+' : ''}${surplus}</div>
 			</div>
 		`;}).join('')}
+	`;
+
+	const html = `
+		${trolleyCard}
+		${polonyCard}
+		${trolleyPlanCard}
+		${summaryBar}
+		${productTable}
 		<div class="action-bar no-print">
 			<button class="btn btn-print" onclick="printPlan()">🖨️ Print</button>
 			<button class="btn btn-save" onclick="saveStockLevels()">💾 Save Stock</button>
@@ -1242,16 +1319,16 @@ function buildTrolleyCardHTML(rt, coldroomBatches) {
 	const extra = calcRussianExtraCapacity(rt);
 	const extraSection = extra.remainingLoose < 0 ? `
 		<div class="trolley-extra trolley-extra-over">
-			<div class="trolley-extra-title">⚠️ Not enough loose Russians for your Produce numbers</div>
+			<div class="trolley-extra-title">⚠️ Not enough for your Produce numbers</div>
 			<div class="trolley-row"><span>Short by</span><b class="surplus-neg">${Math.abs(extra.remainingLoose).toLocaleString()} loose</b></div>
-			<div class="trolley-extra-note">Reduce a Produce number above, or add more Coldroom batches.</div>
+			<div class="trolley-extra-note">Lower a Produce number above, or add Coldroom batches.</div>
 		</div>
 	` : `
 		<div class="trolley-extra">
-			<div class="trolley-extra-title">📦 Extra capacity after your Produce numbers</div>
-			<div class="trolley-row"><span>Loose Russians remaining</span><b>${extra.remainingLoose.toLocaleString()}</b></div>
+			<div class="trolley-extra-title">📦 Extra after today's plan</div>
+			<div class="trolley-row"><span>Left over</span><b>${extra.remainingLoose.toLocaleString()}</b></div>
 			${extra.remainingLoose > 0 ? `
-				<div class="trolley-extra-note">Could still make, using ALL of it on one size:</div>
+				<div class="trolley-extra-note">Could also make (using it all on one size):</div>
 				<div class="trolley-split">
 					<div><span>R6</span><b>+${extra.maxExtra.R01}</b></div>
 					<div><span>R5</span><b>+${extra.maxExtra.R02}</b></div>
@@ -1261,17 +1338,18 @@ function buildTrolleyCardHTML(rt, coldroomBatches) {
 			` : ''}
 		</div>
 	`;
+	const coldroomNeedsInput = !(coldroomBatches > 0);
 	return `
-		<div class="trolley-title">🌭 Russians Trolley — R6/R5/R4/R3 pooled batches</div>
-		<div class="trolley-row"><span>Loose Russians needed</span><b>${rt.totalLoose.toLocaleString()}</b></div>
+		<div class="trolley-title">🥩 Russians Trolley (R6 / R5 / R4 / R3)</div>
+		<div class="trolley-row"><span>Needed today</span><b>${rt.totalLoose.toLocaleString()}</b></div>
 		<div class="trolley-coldroom-input">
-			<span>Coldroom batches on hand <small>(1 batch = ${RUSSIAN_BATCH_YIELD.toLocaleString()} loose)</small></span>
-			<input type="number" class="qty-input" id="russianColdroomInput" value="${coldroomBatches || 0}" min="0" step="0.5"
+			<span>In coldroom now <small>(1 batch = ${RUSSIAN_BATCH_YIELD.toLocaleString()} loose)</small></span>
+			<input type="number" class="qty-input${coldroomNeedsInput ? ' needs-input' : ''}" id="russianColdroomInput" value="${coldroomBatches || 0}" min="0" step="0.5"
 				oninput="updateRussianColdroomBatches(this.value)" onfocus="this.select()">
 		</div>
-		<div class="trolley-row"><span>Loose Russians from coldroom</span><b>${rt.coldroomLoose.toLocaleString()}</b></div>
-		<div class="trolley-row"><span>New batches to cook (1 batch = ${RUSSIAN_BATCH_YIELD.toLocaleString()})</span><b>${rt.batchesNeeded}</b></div>
-		<div class="trolley-row"><span>Total loose Russians available</span><b>${rt.looseAvailable.toLocaleString()}</b></div>
+		<div class="trolley-row"><span>From coldroom</span><b>${rt.coldroomLoose.toLocaleString()}</b></div>
+		<div class="trolley-row"><span>New batches to cook</span><b>${rt.batchesNeeded}</b></div>
+		<div class="trolley-row"><span>Total available</span><b>${rt.looseAvailable.toLocaleString()}</b></div>
 		<div class="trolley-split">
 			<div><span>R6</span><b>${rt.suggestedBags.R01}</b></div>
 			<div><span>R5</span><b>${rt.suggestedBags.R02}</b></div>
