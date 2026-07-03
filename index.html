@@ -107,6 +107,69 @@ body {
 	background: #FFF3E0 !important;
 }
 
+.prow {
+	background: white;
+	border-bottom: 1px solid var(--border);
+	padding: 14px 16px;
+}
+.prow-header {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	cursor: pointer;
+}
+.prow-name-wrap { flex: 1; min-width: 0; }
+.prow-name { font-size: 15px; font-weight: 700; }
+.prow-code { font-size: 11px; color: var(--muted); margin-left: 6px; font-weight: 600; }
+.prow-nums { display: flex; gap: 16px; }
+.prow-num { text-align: center; min-width: 40px; }
+.prow-num-label {
+	display: block;
+	font-size: 10px;
+	color: var(--muted);
+	text-transform: uppercase;
+	letter-spacing: 0.3px;
+	font-weight: 700;
+}
+.prow-num-val { display: block; font-size: 17px; font-weight: 700; }
+.prow-status {
+	min-width: 92px;
+	text-align: right;
+	font-size: 13px;
+	font-weight: 700;
+	white-space: nowrap;
+}
+.prow-status.ok { color: var(--green); }
+.prow-status.produce { color: var(--copper-dark); }
+.prow-chevron {
+	color: var(--muted);
+	font-size: 11px;
+	transition: transform 0.15s;
+	flex-shrink: 0;
+}
+.prow.expanded .prow-chevron { transform: rotate(180deg); }
+.prow-detail {
+	display: none;
+	margin-top: 14px;
+	padding-top: 14px;
+	border-top: 1px dashed var(--border);
+}
+.prow.expanded .prow-detail { display: block; }
+.prow-detail-grid {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 12px;
+}
+.prow-detail-field label {
+	display: block;
+	font-size: 11px;
+	color: var(--muted);
+	margin-bottom: 4px;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.3px;
+}
+
 .context-bar {
 	background: #FFF6EE;
 	border-bottom: 1px solid var(--border);
@@ -967,6 +1030,25 @@ function setPlanSubTab(tab) {
 	renderPlan();
 }
 
+// Expands/collapses a product row to reveal its Stock/Coldroom/Produce/Surplus detail.
+function toggleRow(idx) {
+	const row = document.getElementById('prow_' + idx);
+	if (row) row.classList.toggle('expanded');
+}
+
+// Updates the collapsed row's status pill (✅ Enough / Produce N) — called after anything
+// that can change how much of this product needs producing.
+function refreshRowStatus(idx) {
+	const p = state.products[idx];
+	const statusEl = document.getElementById(`status_${idx}`);
+	if (statusEl) {
+		const produce = displayProduce(p);
+		const enough = produce <= 0;
+		statusEl.textContent = enough ? '✅ Enough' : 'Produce ' + produce;
+		statusEl.className = 'prow-status ' + (enough ? 'ok' : 'produce');
+	}
+}
+
 async function loadPlanForDate() {
 	if (!state.date) return;
 	document.getElementById('mainContent').innerHTML = `
@@ -1252,50 +1334,61 @@ function renderPlan() {
 	// The Trolleys tab is about trolley assignments, not individual products, so it has no
 	// product table of its own — the trolleyPlanCard above is the whole tab.
 	const productTable = tab === 'trolleys' ? '' : `
-		<div class="product-header plan-mode">
-			<div>PRODUCT</div>
-			<div style="text-align:center">FORECAST</div>
-			<div style="text-align:center">STOCK</div>
-			<div style="text-align:center">PRODUCE</div>
-			<div style="text-align:center">SURPLUS</div>
-		</div>
 		${state.products.map((p, i) => {
 			if (productFamily(p.code) !== tab) return '';
 			const isPolony = POLONY_CODES.includes(p.code);
 			const hasColdroom = COLDROOM_SCOPE_CODES.includes(p.code);
 			const coldroomUnit = isPolony ? 'casings' : 'batches';
 			const coldroomNeedsInput = hasColdroom && !(p.coldroomQty > 0);
+			const produce = displayProduce(p);
+			const isEnough = produce <= 0;
 			const surplus = surplusQty(p);
 			const surplusClass = surplus < 0 ? 'surplus-neg' : (surplus > 0 ? 'surplus-pos' : 'surplus-zero');
 			return `
-			<div class="product-row plan-mode">
-				<div>
-					<div class="product-name">${p.name}</div>
-					<div class="product-code">${p.code}</div>
+			<div class="prow" id="prow_${i}">
+				<div class="prow-header" onclick="toggleRow(${i})">
+					<div class="prow-name-wrap">
+						<div class="prow-name">${p.name}<span class="prow-code">${p.code}</span></div>
+					</div>
+					<div class="prow-nums">
+						<div class="prow-num"><span class="prow-num-label">Have</span><span class="prow-num-val" id="have_${i}">${p.stockQty || 0}</span></div>
+						<div class="prow-num"><span class="prow-num-label">Need</span><span class="prow-num-val">${p.plannedQty}</span></div>
+					</div>
+					<div class="prow-status ${isEnough ? 'ok' : 'produce'}" id="status_${i}">${isEnough ? '✅ Enough' : 'Produce ' + produce}</div>
+					<div class="prow-chevron">▼</div>
 				</div>
-				<div class="plan-qty">${p.plannedQty}</div>
-				<div>
-					<input type="number" class="qty-input"
-						id="stock_${i}" value="${p.stockQty || 0}" min="0"
-						oninput="updateStockField(${i}, 'stockQty', this.value)"
-						onfocus="this.select()">
-					${isPolony ? `<div class="unit-hint">packed</div>` : ''}
-					${hasColdroom ? `
-						<input type="number" class="qty-input coldroom-input${coldroomNeedsInput ? ' needs-input' : ''}"
-							id="coldroom_${i}" value="${p.coldroomQty || 0}" min="0" step="0.5"
-							oninput="updateStockField(${i}, 'coldroomQty', this.value)"
-							onfocus="this.select()">
-						<div class="unit-hint">coldroom (${coldroomUnit})</div>
-					` : ''}
+				<div class="prow-detail">
+					<div class="prow-detail-grid">
+						<div class="prow-detail-field">
+							<label>Stock</label>
+							<input type="number" class="qty-input"
+								id="stock_${i}" value="${p.stockQty || 0}" min="0"
+								oninput="updateStockField(${i}, 'stockQty', this.value)"
+								onfocus="this.select()">
+							${isPolony ? `<div class="unit-hint">packed</div>` : ''}
+						</div>
+						${hasColdroom ? `
+						<div class="prow-detail-field">
+							<label>Coldroom (${coldroomUnit})</label>
+							<input type="number" class="qty-input coldroom-input${coldroomNeedsInput ? ' needs-input' : ''}"
+								id="coldroom_${i}" value="${p.coldroomQty || 0}" min="0" step="0.5"
+								oninput="updateStockField(${i}, 'coldroomQty', this.value)"
+								onfocus="this.select()">
+						</div>` : ''}
+						<div class="prow-detail-field">
+							<label>Produce</label>
+							<input type="number" class="qty-input produce-input"
+								id="produce_${i}" value="${produce}" min="0"
+								oninput="updateProduceOverride(${i}, this.value)"
+								onfocus="this.select()">
+							<div class="produce-batches" id="batches_${i}">${batchLabel(p)}</div>
+						</div>
+						<div class="prow-detail-field">
+							<label>Surplus</label>
+							<div class="surplus-qty ${surplusClass}" id="surplus_${i}">${surplus > 0 ? '+' : ''}${surplus}</div>
+						</div>
+					</div>
 				</div>
-				<div>
-					<input type="number" class="qty-input produce-input"
-						id="produce_${i}" value="${displayProduce(p)}" min="0"
-						oninput="updateProduceOverride(${i}, this.value)"
-						onfocus="this.select()">
-					<div class="produce-batches" id="batches_${i}">${batchLabel(p)}</div>
-				</div>
-				<div class="surplus-qty ${surplusClass}" id="surplus_${i}">${surplus > 0 ? '+' : ''}${surplus}</div>
 			</div>
 		`;}).join('')}
 	`;
@@ -1707,6 +1800,7 @@ function updateProduceOverride(idx, val) {
 		surplusEl.textContent = (s > 0 ? '+' : '') + s;
 		surplusEl.className = 'surplus-qty ' + (s < 0 ? 'surplus-neg' : (s > 0 ? 'surplus-pos' : 'surplus-zero'));
 	}
+	refreshRowStatus(idx);
 
 	const totalProduce = state.products.reduce((s, pr) => s + displayProduce(pr), 0);
 	const totalProduceEl = document.getElementById('totalProduceVal');
@@ -1965,6 +2059,9 @@ async function loadSavedTrolleyPlan() {
 function updateStockField(idx, field, val) {
 	state.products[idx][field] = field === 'coldroomQty' ? (parseFloat(val) || 0) : (parseInt(val) || 0);
 
+	const haveEl = document.getElementById(`have_${idx}`);
+	if (haveEl) haveEl.textContent = state.products[idx].stockQty || 0;
+
 	// If this is a Russian code, recalculate the whole trolley and refresh all Russian rows
 	if (RUSSIAN_CODES.includes(state.products[idx].code)) {
 		state.russianTrolley = calcRussiansTrolley(state.products, state.russianColdroomBatches);
@@ -2014,6 +2111,7 @@ function refreshProduceRow(idx) {
 	if (produceEl) produceEl.value = displayProduce(p);
 	const batchesEl = document.getElementById(`batches_${idx}`);
 	if (batchesEl) batchesEl.textContent = batchLabel(p);
+	refreshRowStatus(idx);
 	const surplusEl = document.getElementById(`surplus_${idx}`);
 	if (surplusEl) {
 		const s = surplusQty(p);
