@@ -1631,35 +1631,35 @@ function buildPolonyTrolleyBuilderHTML(trolleys, plan) {
 	const neededMed = plan.P03 ? plan.P03.casingsToMake : 0;
 	const neededLong = plan.P04 ? plan.P04.casingsToMake : 0;
 
-	const progressRow = (label, assigned, needed) => `
+	const progressRow = (label, id, assigned, needed) => `
 		<div class="pt-progress-row">
 			<span>${label}</span>
-			<b class="${assigned >= needed ? 'pc-ok' : 'pc-cook'}">${assigned} / ${needed} casings</b>
+			<b class="${assigned >= needed ? 'pc-ok' : 'pc-cook'}" id="${id}">${assigned} / ${needed} casings</b>
 		</div>`;
 
 	const rows = trolleys.map((t, i) => {
 		const calc = calcPolonyTrolleyRow(t);
 		return `
-			<div class="pt-row ${calc.over ? 'pt-row-over' : ''}">
+			<div class="pt-row ${calc.over ? 'pt-row-over' : ''}" id="pt-row-${i}">
 				<div class="pt-num">${i + 1}</div>
 				<div class="pt-input-group">
 					<label>Small</label>
-					<input type="number" class="pt-input" min="0" value="${t.small || 0}" oninput="updatePolonyTrolley(${i}, 'small', this.value)">
-					<span class="pt-bags">${calc.bagsSmall} bags</span>
+					<input type="number" class="pt-input" min="0" step="0.5" value="${t.small || 0}" oninput="updatePolonyTrolley(${i}, 'small', this.value)">
+					<span class="pt-bags" id="pt-bags-small-${i}">${calc.bagsSmall} bags</span>
 				</div>
 				<div class="pt-input-group">
 					<label>Med</label>
-					<input type="number" class="pt-input" min="0" value="${t.med || 0}" oninput="updatePolonyTrolley(${i}, 'med', this.value)">
-					<span class="pt-bags">${calc.bagsMed} bags</span>
+					<input type="number" class="pt-input" min="0" step="0.5" value="${t.med || 0}" oninput="updatePolonyTrolley(${i}, 'med', this.value)">
+					<span class="pt-bags" id="pt-bags-med-${i}">${calc.bagsMed} bags</span>
 				</div>
 				<div class="pt-input-group">
 					<label>Long</label>
-					<input type="number" class="pt-input" min="0" value="${t.long || 0}" oninput="updatePolonyTrolley(${i}, 'long', this.value)">
-					<span class="pt-bags">${calc.bagsLong} bags</span>
+					<input type="number" class="pt-input" min="0" step="0.5" value="${t.long || 0}" oninput="updatePolonyTrolley(${i}, 'long', this.value)">
+					<span class="pt-bags" id="pt-bags-long-${i}">${calc.bagsLong} bags</span>
 				</div>
-				<div class="pt-total">
+				<div class="pt-total" id="pt-total-${i}">
 					${calc.totalCasings}/${POLONY_TROLLEY_CAPACITY}
-					<div class="pt-status">${calc.over ? `🚫 ${calc.totalCasings - POLONY_TROLLEY_CAPACITY} too many` : '✔ OK'}</div>
+					<div class="pt-status" id="pt-status-${i}">${calc.over ? `🚫 ${calc.totalCasings - POLONY_TROLLEY_CAPACITY} too many` : '✔ OK'}</div>
 				</div>
 				<div class="tp-remove no-print" onclick="removePolonyTrolley(${i})" title="Remove trolley">✕</div>
 			</div>
@@ -1669,9 +1669,9 @@ function buildPolonyTrolleyBuilderHTML(trolleys, plan) {
 	return `
 		<div class="pt-title">🧊 Polony Trolley Builder <small>(max ${POLONY_TROLLEY_CAPACITY} casings per trolley)</small></div>
 		<div class="pt-progress">
-			${progressRow('Small (P02)', assignedSmall, neededSmall)}
-			${progressRow('Med (P03)', assignedMed, neededMed)}
-			${progressRow('Long (P04)', assignedLong, neededLong)}
+			${progressRow('Small (P02)', 'pt-progress-small', assignedSmall, neededSmall)}
+			${progressRow('Med (P03)', 'pt-progress-med', assignedMed, neededMed)}
+			${progressRow('Long (P04)', 'pt-progress-long', assignedLong, neededLong)}
 		</div>
 		<div class="pt-header">
 			<div>#</div><div>SMALL</div><div>MED</div><div>LONG</div><div>CASINGS</div>
@@ -1690,10 +1690,58 @@ function refreshPolonyCard() {
 	if (polonyEl) polonyEl.innerHTML = buildPolonyCardHTML(state.polonyPlan);
 }
 
+// Updates one Polony Trolley Builder cell WITHOUT re-rendering the whole card — a full
+// innerHTML replace on every keystroke was destroying and recreating the input element,
+// which threw away focus after each character and made the field feel uneditable.
 function updatePolonyTrolley(rowIdx, sizeKey, value) {
 	if (!state.polonyTrolleys[rowIdx]) return;
-	state.polonyTrolleys[rowIdx][sizeKey] = parseInt(value) || 0;
-	refreshPolonyCard();
+	state.polonyTrolleys[rowIdx][sizeKey] = parseFloat(value) || 0;
+
+	const t = state.polonyTrolleys[rowIdx];
+	const calc = calcPolonyTrolleyRow(t);
+
+	const bagsSmallEl = document.getElementById(`pt-bags-small-${rowIdx}`);
+	if (bagsSmallEl) bagsSmallEl.textContent = calc.bagsSmall + ' bags';
+	const bagsMedEl = document.getElementById(`pt-bags-med-${rowIdx}`);
+	if (bagsMedEl) bagsMedEl.textContent = calc.bagsMed + ' bags';
+	const bagsLongEl = document.getElementById(`pt-bags-long-${rowIdx}`);
+	if (bagsLongEl) bagsLongEl.textContent = calc.bagsLong + ' bags';
+
+	const totalEl = document.getElementById(`pt-total-${rowIdx}`);
+	if (totalEl) {
+		totalEl.childNodes[0].textContent = `${calc.totalCasings}/${POLONY_TROLLEY_CAPACITY} `;
+	}
+	const statusEl = document.getElementById(`pt-status-${rowIdx}`);
+	if (statusEl) {
+		statusEl.textContent = calc.over ? `🚫 ${calc.totalCasings - POLONY_TROLLEY_CAPACITY} too many` : '✔ OK';
+	}
+	const rowEl = document.getElementById(`pt-row-${rowIdx}`);
+	if (rowEl) rowEl.classList.toggle('pt-row-over', calc.over);
+
+	// Refresh the top progress summary (Small/Med/Long assigned-vs-needed) across ALL trolleys
+	const plan = state.polonyPlan;
+	const assignedSmall = state.polonyTrolleys.reduce((s, tr) => s + (tr.small || 0), 0);
+	const assignedMed = state.polonyTrolleys.reduce((s, tr) => s + (tr.med || 0), 0);
+	const assignedLong = state.polonyTrolleys.reduce((s, tr) => s + (tr.long || 0), 0);
+	const neededSmall = plan.P02 ? plan.P02.casingsToMake : 0;
+	const neededMed = plan.P03 ? plan.P03.casingsToMake : 0;
+	const neededLong = plan.P04 ? plan.P04.casingsToMake : 0;
+
+	const progEl = document.getElementById('pt-progress-small');
+	if (progEl) {
+		progEl.textContent = `${assignedSmall} / ${neededSmall} casings`;
+		progEl.className = assignedSmall >= neededSmall ? 'pc-ok' : 'pc-cook';
+	}
+	const progMedEl = document.getElementById('pt-progress-med');
+	if (progMedEl) {
+		progMedEl.textContent = `${assignedMed} / ${neededMed} casings`;
+		progMedEl.className = assignedMed >= neededMed ? 'pc-ok' : 'pc-cook';
+	}
+	const progLongEl = document.getElementById('pt-progress-long');
+	if (progLongEl) {
+		progLongEl.textContent = `${assignedLong} / ${neededLong} casings`;
+		progLongEl.className = assignedLong >= neededLong ? 'pc-ok' : 'pc-cook';
+	}
 }
 
 function addPolonyTrolley() {
