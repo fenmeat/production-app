@@ -944,6 +944,9 @@ const POLONY_CODES = ['P02', 'P03', 'P04'];
 const VIENNA_CODES = ['V01', 'V02']; // support Full or Half batches
 
 const SKIP_BATCH_CODES = ['W07']; // Patties: cut from frozen rolls, no batch rounding
+// Bought-in / repackaged items — Alex never cooks these, only packs from purchased stock
+// (per RECIPES_REF notes). On the printout these belong under PACK, never PRODUCE.
+const BOUGHT_IN_CODES = ['C01', 'C02', 'C03', 'S01', 'S02', 'S03', 'O01', 'O02', 'O03'];
 
 // Products whose batches are physically cooked on shared trolleys (2 half-slots per trolley).
 // Confirmed scope: Russians (R01-R08, incl. pooled R01-R04) + Vienna/Cheese Vienna only.
@@ -1218,14 +1221,22 @@ function buildPrintLayout() {
 	const leftProducts = state.products.slice(0, half);
 	const rightProducts = state.products.slice(half);
 
-	const productRow = p => `
+	// Pooled Russians (R01-R04) already blend coldroom + fresh-cooked loose meat into one
+	// "bags to pack" number, and bought-in items (Chicken, Six Gun, offal) are never actually
+	// cooked — both belong under PACK on the printout, not PRODUCE, to avoid confusion.
+	const packOnlyRow = p => RUSSIAN_CODES.includes(p.code) || BOUGHT_IN_CODES.includes(p.code);
+
+	const productRow = p => {
+		const packOnly = packOnlyRow(p);
+		return `
 		<tr>
 			<td class="pp-code">${p.code}</td>
 			<td class="pp-name">${p.name}</td>
-			<td class="pp-produce">${displayProduce(p) || ''}</td>
-			<td class="pp-pack">${packToday(p) || ''}</td>
+			<td class="pp-produce">${packOnly ? '' : (displayProduce(p) || '')}</td>
+			<td class="pp-pack">${packOnly ? (displayProduce(p) || '') : (packToday(p) || '')}</td>
 			<td class="pp-actual"></td>
 		</tr>`;
+	};
 
 	const productTable = products => `
 		<table class="pp-table">
