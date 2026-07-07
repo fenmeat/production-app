@@ -2295,8 +2295,20 @@ async function saveAll() {
 	}
 }
 
+// Single "target to log against" for LOG ACTUALS — mirrors the same Produce/Pack split used
+// on the printout, but combined into one number since Log Actuals only has one Plan column.
+// Pooled Russians and bought-in items: their number already covers everything (no separate
+// coldroom pool to add). Polony and individually-coldroomed products: coldroom stock + fresh
+// production combined, same as packToday() — otherwise Log Actuals showed "0" for a product
+// that still has a full coldroom batch waiting to be packed, same bug as the Plan screen had.
+function planTarget(p) {
+	if (RUSSIAN_CODES.includes(p.code) || BOUGHT_IN_CODES.includes(p.code)) return displayProduce(p);
+	if (POLONY_CODES.includes(p.code) || COLDROOM_BATCH_CODES.includes(p.code)) return packToday(p);
+	return displayProduce(p);
+}
+
 function renderActuals() {
-	const totalPlanned = state.products.reduce((s, p) => s + displayProduce(p), 0);
+	const totalPlanned = state.products.reduce((s, p) => s + planTarget(p), 0);
 	const totalActual = state.products.reduce((s, p) => s + (p.actualQty || 0), 0);
 	const totalActualSurplus = state.products.reduce((s, p) => s + actualSurplusQty(p), 0);
 
@@ -2330,7 +2342,7 @@ function renderActuals() {
 					<div class="product-name">${p.name}</div>
 					<div class="product-code">${p.code}</div>
 				</div>
-				<div class="plan-qty">${displayProduce(p)}</div>
+				<div class="plan-qty">${planTarget(p)}</div>
 				<div>
 					<input type="number" class="qty-input"
 						id="actual_${i}" value="${p.actualQty}" min="0"
@@ -2355,7 +2367,7 @@ function actualSurplusQty(p) {
 		const plan = state.polonyPlan[p.code];
 		return (plan.packedStock + plan.bagsAvailable + (p.actualQty || 0)) - plan.bagsNeeded;
 	}
-	return (p.actualQty || 0) - netNeed(p);
+	return (p.actualQty || 0) - planTarget(p);
 }
 
 function updateActual(idx, val) {
