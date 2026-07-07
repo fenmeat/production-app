@@ -825,7 +825,8 @@ body {
 	letter-spacing: 0.3px;
 }
 .pp-table thead th:nth-child(3),
-.pp-table thead th:nth-child(4) { text-align: center; }
+.pp-table thead th:nth-child(4),
+.pp-table thead th:nth-child(5) { text-align: center; }
 .pp-table tbody tr:nth-child(even) { background: #f2f2f2; }
 .pp-table td {
 	padding: 4px 6px;
@@ -833,10 +834,11 @@ body {
 }
 .pp-code { color: var(--muted); font-size: 10px; width: 30px; }
 .pp-name { font-weight: 600; }
-.pp-produce { text-align: center; font-weight: 700; width: 40px; }
+.pp-produce { text-align: center; font-weight: 700; width: 36px; }
+.pp-pack { text-align: center; font-weight: 700; width: 36px; color: var(--copper-dark); }
 .pp-actual {
 	text-align: center;
-	width: 40px;
+	width: 36px;
 	border: 1px solid #999 !important;
 	background: white;
 }
@@ -910,11 +912,11 @@ body {
 </div>
 
 <div class="subtab-bar no-print" id="planSubTabBar">
-	<button class="subtab-btn active" id="subtabWors" onclick="setPlanSubTab('wors')">🌭 WORS</button>
-	<button class="subtab-btn" id="subtabRussians" onclick="setPlanSubTab('russians')">🥩 RUSSIANS</button>
-	<button class="subtab-btn" id="subtabVienna" onclick="setPlanSubTab('vienna')">🌡️ VIENNA</button>
-	<button class="subtab-btn" id="subtabPolony" onclick="setPlanSubTab('polony')">🧀 POLONY</button>
-	<button class="subtab-btn" id="subtabTrolleys" onclick="setPlanSubTab('trolleys')">🛒 TROLLEYS</button>
+	<button class="subtab-btn active" id="subtabWors" onclick="setPlanSubTab('wors')">WORS</button>
+	<button class="subtab-btn" id="subtabRussians" onclick="setPlanSubTab('russians')">RUSSIANS</button>
+	<button class="subtab-btn" id="subtabVienna" onclick="setPlanSubTab('vienna')">VIENNA</button>
+	<button class="subtab-btn" id="subtabPolony" onclick="setPlanSubTab('polony')">POLONY</button>
+	<button class="subtab-btn" id="subtabTrolleys" onclick="setPlanSubTab('trolleys')">TROLLEYS</button>
 </div>
 
 <div class="context-bar no-print" id="contextBar" style="display:none"></div>
@@ -1221,12 +1223,13 @@ function buildPrintLayout() {
 			<td class="pp-code">${p.code}</td>
 			<td class="pp-name">${p.name}</td>
 			<td class="pp-produce">${displayProduce(p) || ''}</td>
+			<td class="pp-pack">${packToday(p) || ''}</td>
 			<td class="pp-actual"></td>
 		</tr>`;
 
 	const productTable = products => `
 		<table class="pp-table">
-			<thead><tr><th>Code</th><th>Product</th><th>Produce</th><th>Actual</th></tr></thead>
+			<thead><tr><th>Code</th><th>Product</th><th>Produce</th><th>Pack</th><th>Actual</th></tr></thead>
 			<tbody>${products.map(productRow).join('')}</tbody>
 		</table>`;
 
@@ -1764,6 +1767,25 @@ function coldroomBagsFor(p) {
 		return (p.coldroomQty || 0) * (p.bagsPerBatch || 0);
 	}
 	return 0; // Polony's coldroom (casings) is handled separately in calcPolonyPlan
+}
+
+// Total bags to physically PACK today = everything currently sitting in coldroom for this
+// product, PLUS whatever's being freshly produced today (Produce). This is deliberately NOT
+// limited to "need" — once a coldroom batch is being packed, the whole batch gets packed
+// (and any batches cooked fresh today get packed same-day too), regardless of what the
+// Forecast/Stock netting alone would suggest. Example: 1 coldroom batch of Econo Russian
+// (22 bags) + 2 fresh batches made today (44 bags) = 66 total to pack, even though the
+// Produce number on its own only shows the 44 that still needed cooking.
+function packToday(p) {
+	if (POLONY_CODES.includes(p.code)) {
+		const plan = state.polonyPlan[p.code];
+		const coldroomBags = plan ? plan.bagsAvailable : 0;
+		return coldroomBags + displayProduce(p);
+	}
+	if (COLDROOM_BATCH_CODES.includes(p.code)) {
+		return coldroomBagsFor(p) + displayProduce(p);
+	}
+	return 0;
 }
 
 // Unclamped need — can go negative when Stock/Coldroom already exceed Forecast. Used only
