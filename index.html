@@ -618,6 +618,9 @@ body {
 	font-size: 13px;
 }
 .tp-row:last-of-type { border-bottom: none; }
+.tp-row-readonly { opacity: 0.85; }
+.tp-readonly-label { font-size: 12px; color: #4a3570; }
+.tp-polony-header { margin-top: 10px; }
 .tp-num {
 	font-weight: 700;
 	color: #4a3570;
@@ -1088,6 +1091,7 @@ async function loadPlanForDate() {
 		state.trolleyAssignments = buildDefaultTrolleyAssignments(state.batchesRequired);
 		state.polonyTrolleys = buildDefaultPolonyTrolleys(state.polonyPlan);
 		await loadSavedTrolleyPlan(); // overrides trolleyAssignments, polonyTrolleys, and produceOverride
+		state.trolleyAssignments = reconcileTrolleyAssignments(state.trolleyAssignments, state.batchesRequired);
 
 		// Only now is displayProduce(p) meaningful for every product (Stock/Coldroom loaded,
 		// Trolley/Polony plans computed, any saved Produce override restored) — so actuals
@@ -1321,7 +1325,7 @@ function renderPlan() {
 	const polonyCardInner = buildPolonyCardHTML(state.polonyPlan);
 	const polonyCard = tab === 'polony' ? `<div class="polony-card no-print" id="polonyCard">${polonyCardInner}</div>` : '';
 
-	const trolleyPlanInner = buildTrolleyPlanCardHTML(state.batchesRequired, state.trolleyAssignments);
+	const trolleyPlanInner = buildTrolleyPlanCardHTML(state.batchesRequired, state.trolleyAssignments, state.polonyTrolleys);
 	const trolleyPlanCard = tab === 'trolleys' ? `<div class="trolleyplan-card no-print" id="trolleyPlanCard">${trolleyPlanInner}</div>` : '';
 
 	const summaryBar = `
@@ -1388,6 +1392,7 @@ function renderPlan() {
 								id="coldroom_${i}" value="${p.coldroomQty || 0}" min="0" step="0.5"
 								oninput="updateStockField(${i}, 'coldroomQty', this.value)"
 								onfocus="this.select()">
+							<div class="unit-hint" id="coldroom_hint_${i}">= ${coldroomBagsHint(p)} bags</div>
 						</div>` : ''}
 						<div class="prow-detail-field">
 							<label>Produce</label>
@@ -1780,6 +1785,16 @@ function coldroomBagsFor(p) {
 	return 0; // Polony's coldroom (casings) is handled separately in calcPolonyPlan
 }
 
+// How many bags the entered Coldroom quantity actually converts to — shown next to the
+// Coldroom input so it's clear at a glance what "2 batches" or "3 casings" means in bags,
+// not just an abstract count.
+function coldroomBagsHint(p) {
+	if (POLONY_CODES.includes(p.code)) {
+		return (p.coldroomQty || 0) * (POLONY_BAGS_PER_CASING[p.code] || 0);
+	}
+	return coldroomBagsFor(p);
+}
+
 // Total bags to physically PACK today = everything currently sitting in coldroom for this
 // product, PLUS whatever's being freshly produced today (Produce). This is deliberately NOT
 // limited to "need" — once a coldroom batch is being packed, the whole batch gets packed
@@ -2021,6 +2036,39 @@ function calcTotalTrolleysNeeded(req) {
 	return Math.ceil(russianCount / 2) + Math.ceil(viennaCount / 2);
 }
 
+// Guarantees the trolley plan always has ENOUGH slots to cover every batch currently
+// required — without discarding any existing rows Alex has manually set or reordered.
+// Needed because loading a previously-saved plan (or a Produce number changing after the
+// plan was last saved) could otherwise leave some required batches with nowhere to be
+// cooked. Any shortfall is appended as additional trolley pairs, up to the daily cap.
+function reconcileTrolleyAssignments(assignments, req) {
+	const RUSSIAN_FAMILY = ['RUSSIAN', 'ECONO RUSSIAN', 'CHEESE RUSSIAN', 'BABALAS RUSSIAN'];
+	const VIENNA_FAMILY = ['VIENNA Full', 'VIENNA Half', 'CHEESE VIENNA Full', 'CHEESE VIENNA Half'];
+	const trackedLabels = [...RUSSIAN_FAMILY, ...VIENNA_FAMILY];
+
+	const counted = {};
+	trackedLabels.forEach(l => counted[l] = 0);
+	assignments.forEach(a => {
+		if (counted[a.half1] !== undefined) counted[a.half1]++;
+		if (counted[a.half2] !== undefined) counted[a.half2]++;
+	});
+
+	const missingUnits = [];
+	trackedLabels.forEach(label => {
+		const shortfall = (req[label] || 0) - counted[label];
+		for (let i = 0; i < shortfall; i++) missingUnits.push(label);
+	});
+
+	if (missingUnits.length === 0) return assignments;
+
+	const extraPairs = [];
+	for (let i = 0; i < missingUnits.length; i += 2) {
+		extraPairs.push({ half1: missingUnits[i] || '', half2: missingUnits[i + 1] || '' });
+	}
+
+	return assignments.concat(extraPairs).slice(0, MAX_TROLLEYS_PER_DAY);
+}
+
 function trolleyHalfSelectHTML(rowIdx, halfKey, currentVal) {
 	const options = [''].concat(TROLLEY_BATCH_LABELS);
 	return `<select class="tp-select" onchange="updateTrolleyHalf(${rowIdx}, '${halfKey}', this.value)">
@@ -2034,7 +2082,7 @@ function trolleyBagsLabel(label) {
 	return `${trolleyBatchBags(label)} bags`;
 }
 
-function buildTrolleyPlanCardHTML(req, assignments) {
+function buildTrolleyPlanCardHTML(req, assignments, polonyTrolleys) {
 	const reqRows = TROLLEY_BATCH_LABELS.filter(l => (req[l] || 0) > 0)
 		.map(l => `<div class="tp-req-row"><span>${l}</span><b>${req[l]}</b></div>`).join('');
 	const reqSection = `
@@ -2065,6 +2113,28 @@ function buildTrolleyPlanCardHTML(req, assignments) {
 		`;
 	}).join('');
 
+	// Polony trolleys are built and edited on the POLONY tab's Polony Trolley Builder, not
+	// here — these rows are read-only, just so the full day's trolley picture is visible in
+	// one place. Only shown if at least one Polony trolley has actually been planned.
+	const polonyRows = (polonyTrolleys || []).map((t, i) => {
+		const calc = calcPolonyTrolleyRow(t);
+		return `
+			<div class="tp-row tp-row-readonly">
+				<div class="tp-num">P${i + 1}</div>
+				<div class="tp-half"><span class="tp-readonly-label">Small ${t.small || 0} / Med ${t.med || 0} / Long ${t.long || 0}</span></div>
+				<div class="tp-half"><span class="tp-readonly-label">(edit on POLONY tab)</span></div>
+				<div class="tp-total">${calc.totalCasings} casings</div>
+				<div></div>
+			</div>
+		`;
+	}).join('');
+	const polonySection = polonyRows ? `
+		<div class="tp-header tp-polony-header">
+			<div>#</div><div>POLONY TROLLEY</div><div></div><div>CASINGS</div>
+		</div>
+		${polonyRows}
+	` : '';
+
 	return `
 		<div class="trolleyplan-title">🛒 Production Trolley Plan — editable (${assignments.length}/${MAX_TROLLEYS_PER_DAY} trolleys)</div>
 		${overflowWarning}
@@ -2073,6 +2143,7 @@ function buildTrolleyPlanCardHTML(req, assignments) {
 			<div>#</div><div>HALF 1</div><div>HALF 2</div><div>BAGS</div>
 		</div>
 		${rows || '<div class="tp-req-row"><span>No trolleys yet — add one below</span></div>'}
+		${polonySection}
 		<div class="tp-actions no-print">
 			<button class="tp-btn" onclick="addTrolleyRow()">+ Add Trolley</button>
 			<button class="tp-btn tp-btn-reset" onclick="resetTrolleyPlan()">↺ Reset to Auto-Plan</button>
@@ -2083,8 +2154,9 @@ function buildTrolleyPlanCardHTML(req, assignments) {
 
 function refreshTrolleyPlanCard() {
 	state.batchesRequired = calcBatchesRequired(state.products, state.russianTrolley, state.polonyPlan);
+	state.trolleyAssignments = reconcileTrolleyAssignments(state.trolleyAssignments, state.batchesRequired);
 	const tpEl = document.getElementById('trolleyPlanCard');
-	if (tpEl) tpEl.innerHTML = buildTrolleyPlanCardHTML(state.batchesRequired, state.trolleyAssignments);
+	if (tpEl) tpEl.innerHTML = buildTrolleyPlanCardHTML(state.batchesRequired, state.trolleyAssignments, state.polonyTrolleys);
 }
 
 function updateTrolleyHalf(rowIdx, halfKey, value) {
@@ -2142,6 +2214,11 @@ function updateStockField(idx, field, val) {
 
 	const haveEl = document.getElementById(`have_${idx}`);
 	if (haveEl) haveEl.textContent = state.products[idx].stockQty || 0;
+
+	if (field === 'coldroomQty') {
+		const hintEl = document.getElementById(`coldroom_hint_${idx}`);
+		if (hintEl) hintEl.textContent = `= ${coldroomBagsHint(state.products[idx])} bags`;
+	}
 
 	// If this is a Russian code, recalculate the whole trolley and refresh all Russian rows
 	if (RUSSIAN_CODES.includes(state.products[idx].code)) {
