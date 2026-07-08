@@ -1166,7 +1166,7 @@ async function loadActualsForDate() {
 			data.products.forEach(p => { savedByCode[p.code] = p.actualQty; });
 		}
 		state.products.forEach(p => {
-			p.actualQty = savedByCode[p.code] !== undefined ? savedByCode[p.code] : displayProduce(p);
+			p.actualQty = savedByCode[p.code] !== undefined ? savedByCode[p.code] : null;
 		});
 	} catch (e) {
 		// Non-fatal — plan still shows, actuals just won't be pre-filled
@@ -2422,7 +2422,7 @@ function renderActuals() {
 				<div class="plan-qty">${planTarget(p)}</div>
 				<div>
 					<input type="number" class="qty-input"
-						id="actual_${i}" value="${p.actualQty}" min="0"
+						id="actual_${i}" value="${p.actualQty === null || p.actualQty === undefined ? '' : p.actualQty}" min="0"
 						oninput="updateActual(${i}, this.value)"
 						onfocus="this.select()">
 				</div>
@@ -2448,7 +2448,7 @@ function actualSurplusQty(p) {
 }
 
 function updateActual(idx, val) {
-	state.products[idx].actualQty = parseInt(val) || 0;
+	state.products[idx].actualQty = (val === '' || val === null) ? null : (parseInt(val) || 0);
 	const total = state.products.reduce((s, p) => s + (p.actualQty || 0), 0);
 	const totalEl = document.getElementById('totalActualVal');
 	if (totalEl) totalEl.textContent = total;
