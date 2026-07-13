@@ -11,40 +11,57 @@
 	--green: #27AE60;
 	--orange: #E67E22;
 
-	/* FenMeat Corporate Identity palette (see FENMEAT_Corporate_Identity_Guide.pdf) */
-	--blue: #003CFF;      /* Royal Blue — primary brand colour */
-	--dark: #1F2937;      /* Charcoal — typography, dark surfaces */
-	--silver: #D1D5DB;    /* Silver Grey — supporting backgrounds/borders */
-	--platinum: #F4F4F5;  /* Platinum — supporting backgrounds */
+	/* Elevated Precision — FenMeat's implementation (see Master Context Doc Section 8) */
+	--charcoal: #12141C;   /* dark base — header, dark surfaces */
+	--steel: #262B38;      /* secondary dark tone, paired with Charcoal in gradients */
+	--blue: #003CFF;       /* Royal Blue — brand accent, used SPARINGLY, not flooded */
+	--blue-deep: #0026B3;  /* Royal Blue Deep — gradient partner for the accent */
+	--platinum: #F6F5F1;   /* main light background, warmer than plain white/grey */
+	--silver: #C9CDD6;     /* muted text/dividers on dark surfaces */
+
+	/* Legacy aliases kept so existing rules referencing var(--dark)/var(--platinum) below
+	   still resolve sensibly to the new palette without needing every single rule rewritten */
+	--dark: var(--charcoal);
 
 	--mid: #2d2d2d;
 	--card: #f9f9f9;
-	--border: #e0e0e0;
-	--text: #222;
-	--muted: #777;
+	--border: #e3e1da;
+	--text: #24262E;
+	--muted: #767a85;
 }
+
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap');
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
-	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-	background: #f0f0f0;
+	font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+	background: var(--platinum);
 	color: var(--text);
 	-webkit-tap-highlight-color: transparent;
+	font-variant-numeric: tabular-nums;
 }
 
 .header {
-	background: var(--dark);
+	background: linear-gradient(135deg, var(--charcoal), var(--steel));
 	color: white;
-	padding: 10px 16px;
+	padding: 8px 16px;
 	display: flex;
 	justify-content: space-between;
 	align-items: center;
+	position: relative;
+}
+.header::after {
+	content: '';
+	position: absolute;
+	bottom: 0; left: 0; right: 0;
+	height: 1px;
+	background: linear-gradient(90deg, transparent, rgba(255,255,255,0.15), transparent);
 }
 .header-brand { display: flex; align-items: center; gap: 10px; }
-.header-logo { height: 36px; width: auto; display: block; }
-.header-brand-text { font-size: 14px; font-weight: 600; color: #d1d5db; letter-spacing: 0.3px; }
-.header-right { font-size: 12px; color: #aaa; text-align: right; }
+.header-logo { height: 60px; width: auto; display: block; }
+.header-brand-text { font-size: 14px; font-weight: 600; color: var(--silver); letter-spacing: 0.3px; }
+.header-right { font-size: 12px; color: var(--silver); text-align: right; }
 
 .date-bar {
 	background: white;
@@ -77,8 +94,8 @@ body {
 	font-weight: 700;
 	cursor: pointer;
 }
-.mode-btn.active.plan { background: var(--blue); color: white; }
-.mode-btn.active.actuals { background: var(--dark); color: white; }
+.mode-btn.active.plan { background: linear-gradient(135deg, var(--blue), var(--blue-deep)); color: white; }
+.mode-btn.active.actuals { background: linear-gradient(135deg, var(--charcoal), var(--steel)); color: white; }
 
 .subtab-bar {
 	display: flex;
@@ -254,7 +271,7 @@ body {
 	text-transform: uppercase;
 	letter-spacing: 0.4px;
 }
-.product-header.actuals-mode { grid-template-columns: 1fr 60px 70px 60px; }
+.product-header.actuals-mode { grid-template-columns: 1fr 55px 65px 65px 55px; }
 .product-header.plan-mode { grid-template-columns: 1fr 58px 58px 58px 58px; }
 
 .product-row {
@@ -266,7 +283,7 @@ body {
 	background: white;
 	border-bottom: 1px solid var(--border);
 }
-.product-row.actuals-mode { grid-template-columns: 1fr 60px 70px 60px; }
+.product-row.actuals-mode { grid-template-columns: 1fr 55px 65px 65px 55px; }
 .product-row.plan-mode { grid-template-columns: 1fr 58px 58px 58px 58px; }
 .product-row:nth-child(even) { background: #fafafa; }
 
@@ -328,11 +345,20 @@ body {
 .empty-state .big { font-size: 32px; margin-bottom: 8px; }
 
 .trolley-card {
-	background: var(--platinum);
-	border: 1px solid var(--blue);
-	border-radius: 8px;
+	background: white;
+	border: 1px solid var(--border);
+	border-radius: 10px;
 	margin: 12px 16px;
 	padding: 14px 16px;
+	position: relative;
+	box-shadow: 0 1px 2px rgba(18,20,28,0.05), 0 4px 14px rgba(18,20,28,0.07);
+}
+.trolley-card::before {
+	content: '';
+	position: absolute;
+	top: 0; left: 10px; right: 10px;
+	height: 1px;
+	background: linear-gradient(90deg, transparent, rgba(0,60,255,0.35), transparent);
 }
 .trolley-title {
 	font-size: 13px;
@@ -431,11 +457,20 @@ body {
 }
 
 .polony-card {
-	background: var(--platinum);
-	border: 1px solid var(--green);
-	border-radius: 8px;
+	background: white;
+	border: 1px solid var(--border);
+	border-radius: 10px;
 	margin: 0 16px 12px;
 	padding: 14px 16px;
+	position: relative;
+	box-shadow: 0 1px 2px rgba(18,20,28,0.05), 0 4px 14px rgba(18,20,28,0.07);
+}
+.polony-card::before {
+	content: '';
+	position: absolute;
+	top: 0; left: 10px; right: 10px;
+	height: 1px;
+	background: linear-gradient(90deg, transparent, rgba(0,60,255,0.35), transparent);
 }
 .polony-title {
 	font-size: 13px;
@@ -561,11 +596,20 @@ body {
 .pt-row-over .pt-status { color: var(--red); }
 
 .trolleyplan-card {
-	background: var(--platinum);
-	border: 1px solid var(--blue);
-	border-radius: 8px;
+	background: white;
+	border: 1px solid var(--border);
+	border-radius: 10px;
 	margin: 0 16px 12px;
 	padding: 14px 16px;
+	position: relative;
+	box-shadow: 0 1px 2px rgba(18,20,28,0.05), 0 4px 14px rgba(18,20,28,0.07);
+}
+.trolleyplan-card::before {
+	content: '';
+	position: absolute;
+	top: 0; left: 10px; right: 10px;
+	height: 1px;
+	background: linear-gradient(90deg, transparent, rgba(0,60,255,0.35), transparent);
 }
 .trolleyplan-title {
 	font-size: 13px;
@@ -695,7 +739,7 @@ body {
 	cursor: pointer;
 }
 .tp-btn-reset { background: var(--platinum); }
-.tp-btn-save { background: var(--blue); color: white; }
+.tp-btn-save { background: linear-gradient(135deg, var(--blue), var(--blue-deep)); color: white; box-shadow: 0 1px 2px rgba(18,20,28,0.08), 0 3px 8px rgba(18,20,28,0.12); }
 
 .unit-hint {
 	text-align: center;
@@ -733,14 +777,16 @@ body {
 	flex: 1;
 	padding: 14px;
 	border: none;
-	border-radius: 8px;
+	border-radius: 10px;
 	font-size: 15px;
 	font-weight: 700;
 	cursor: pointer;
+	position: relative;
+	box-shadow: 0 1px 2px rgba(18,20,28,0.08), 0 3px 8px rgba(18,20,28,0.12);
 }
-.btn-print { background: var(--mid); color: white; }
-.btn-save { background: var(--blue); color: white; }
-.btn-save:disabled { background: #ccc; cursor: not-allowed; }
+.btn-print { background: linear-gradient(135deg, var(--charcoal), var(--steel)); color: white; }
+.btn-save { background: linear-gradient(135deg, var(--blue), var(--blue-deep)); color: white; }
+.btn-save:disabled { background: #ccc; box-shadow: none; cursor: not-allowed; }
 
 .toast {
 	position: fixed;
@@ -1094,7 +1140,7 @@ async function loadPlanForDate() {
 		state.period = data.period || 'NORMAL';
 		state.sourceByRoute = data.sourceByRoute || {};
 		state.products = (data.products || []).map(p => ({
-			code: p.code, name: p.name, plannedQty: p.qty, actualQty: p.qty, stockQty: 0, coldroomQty: 0, bagsPerBatch: 0, produceOverride: null
+			code: p.code, name: p.name, plannedQty: p.qty, actualQty: p.qty, actualColdroom: null, stockQty: 0, coldroomQty: 0, bagsPerBatch: 0, produceOverride: null
 		}));
 
 		// Pull current stock levels and batch sizes first — Produce depends on these
@@ -2096,9 +2142,33 @@ function reconcileTrolleyAssignments(assignments, req) {
 	const VIENNA_FAMILY = ['VIENNA Full', 'VIENNA Half', 'CHEESE VIENNA Full', 'CHEESE VIENNA Half'];
 	const trackedLabels = [...RUSSIAN_FAMILY, ...VIENNA_FAMILY];
 
+	// Work on a copy so nothing here mutates the caller's array in place.
+	let result = assignments.map(a => ({ half1: a.half1, half2: a.half2 }));
+
+	// STRIP EXCESS FIRST: a product that's now "✅ Enough" (req dropped to 0, or below what's
+	// currently assigned) shouldn't keep a stale trolley slot just because it needed one
+	// earlier in the session. Clear just the excess occurrences of that label, not the whole row.
+	const excessToRemove = {};
+	trackedLabels.forEach(label => {
+		const countedNow = result.reduce((s, a) => s + (a.half1 === label ? 1 : 0) + (a.half2 === label ? 1 : 0), 0);
+		excessToRemove[label] = Math.max(0, countedNow - (req[label] || 0));
+	});
+	result.forEach(a => {
+		['half1', 'half2'].forEach(key => {
+			const label = a[key];
+			if (excessToRemove[label] > 0) {
+				a[key] = '';
+				excessToRemove[label]--;
+			}
+		});
+	});
+	// A row that's now empty on both sides isn't doing anything — drop it.
+	result = result.filter(a => a.half1 || a.half2);
+
+	// TOP UP SHORTFALL: same as before — add slots for anything still missing.
 	const counted = {};
 	trackedLabels.forEach(l => counted[l] = 0);
-	assignments.forEach(a => {
+	result.forEach(a => {
 		if (counted[a.half1] !== undefined) counted[a.half1]++;
 		if (counted[a.half2] !== undefined) counted[a.half2]++;
 	});
@@ -2109,14 +2179,14 @@ function reconcileTrolleyAssignments(assignments, req) {
 		for (let i = 0; i < shortfall; i++) missingUnits.push(label);
 	});
 
-	if (missingUnits.length === 0) return assignments;
+	if (missingUnits.length === 0) return result;
 
 	const extraPairs = [];
 	for (let i = 0; i < missingUnits.length; i += 2) {
 		extraPairs.push({ half1: missingUnits[i] || '', half2: missingUnits[i + 1] || '' });
 	}
 
-	return assignments.concat(extraPairs).slice(0, MAX_TROLLEYS_PER_DAY);
+	return result.concat(extraPairs).slice(0, MAX_TROLLEYS_PER_DAY);
 }
 
 function trolleyHalfSelectHTML(rowIdx, halfKey, currentVal) {
@@ -2465,6 +2535,7 @@ function renderActuals() {
 			<div>PRODUCT</div>
 			<div style="text-align:center">PLAN</div>
 			<div style="text-align:center">ACTUAL</div>
+			<div style="text-align:center">COLDROOM</div>
 			<div style="text-align:center">SURPLUS</div>
 		</div>
 		${state.products.map((p, i) => {
@@ -2483,6 +2554,12 @@ function renderActuals() {
 						oninput="updateActual(${i}, this.value)"
 						onfocus="this.select()">
 				</div>
+				<div>
+					<input type="number" class="qty-input"
+						id="actualColdroom_${i}" value="${p.actualColdroom === null || p.actualColdroom === undefined ? '' : p.actualColdroom}" min="0"
+						oninput="updateActualColdroom(${i}, this.value)"
+						onfocus="this.select()">
+				</div>
 				<div class="surplus-qty ${sClass}" id="actualSurplus_${i}">${s > 0 ? '+' : ''}${s}</div>
 			</div>
 		`;}).join('')}
@@ -2493,15 +2570,17 @@ function renderActuals() {
 	document.getElementById('mainContent').innerHTML = html;
 }
 
-// Actual Surplus = what was actually produced minus the net bags needed (same rawNeed used
-// on the Plan screen) — mirrors the Plan screen's Surplus column, but against Actual instead
-// of the (possibly overridden) Produce number.
+// Actual Surplus = what was actually PACKED plus whatever went to Coldroom instead (not
+// packed today, but still made — e.g. an extra batch cooked for tomorrow) minus the net bags
+// needed. Without the Coldroom part, a batch that was cooked but deliberately held back for
+// tomorrow would show as a false shortfall instead of correctly counting as stock made today.
 function actualSurplusQty(p) {
+	const coldroomAdded = p.actualColdroom || 0;
 	if (POLONY_CODES.includes(p.code) && state.polonyPlan[p.code]) {
 		const plan = state.polonyPlan[p.code];
-		return (plan.packedStock + plan.bagsAvailable + (p.actualQty || 0)) - plan.bagsNeeded;
+		return (plan.packedStock + plan.bagsAvailable + (p.actualQty || 0) + coldroomAdded) - plan.bagsNeeded;
 	}
-	return (p.actualQty || 0) - planTarget(p);
+	return (p.actualQty || 0) + coldroomAdded - planTarget(p);
 }
 
 function updateActual(idx, val) {
@@ -2509,6 +2588,24 @@ function updateActual(idx, val) {
 	const total = state.products.reduce((s, p) => s + (p.actualQty || 0), 0);
 	const totalEl = document.getElementById('totalActualVal');
 	if (totalEl) totalEl.textContent = total;
+
+	const s = actualSurplusQty(state.products[idx]);
+	const surplusEl = document.getElementById(`actualSurplus_${idx}`);
+	if (surplusEl) {
+		surplusEl.textContent = (s > 0 ? '+' : '') + s;
+		surplusEl.className = 'surplus-qty ' + (s < 0 ? 'surplus-neg' : (s > 0 ? 'surplus-pos' : 'surplus-zero'));
+	}
+
+	const totalSurplus = state.products.reduce((sum, p) => sum + actualSurplusQty(p), 0);
+	const totalSurplusEl = document.getElementById('totalActualSurplusVal');
+	if (totalSurplusEl) {
+		totalSurplusEl.textContent = (totalSurplus > 0 ? '+' : '') + totalSurplus;
+		totalSurplusEl.className = 'summary-val ' + (totalSurplus < 0 ? 'surplus-neg' : '');
+	}
+}
+
+function updateActualColdroom(idx, val) {
+	state.products[idx].actualColdroom = (val === '' || val === null) ? null : (parseInt(val) || 0);
 
 	const s = actualSurplusQty(state.products[idx]);
 	const surplusEl = document.getElementById(`actualSurplus_${idx}`);
@@ -2537,20 +2634,50 @@ async function saveActuals() {
 		actualQty: p.actualQty || 0
 	}));
 
+	// Anything entered in the new COLDROOM column is a batch that was cooked today but not
+	// packed (going into the fridge for tomorrow instead) — add it onto whatever Coldroom
+	// stock the product already has, so tomorrow's Plan screen picks it up automatically
+	// without Alex having to remember to re-enter it there too.
+	const coldroomAdditions = state.products
+		.map(p => ({ p, add: p.actualColdroom || 0 }))
+		.filter(x => x.add > 0);
+	const coldroomStockRows = coldroomAdditions.map(x => ({
+		code: x.p.code,
+		qty: x.p.stockQty || 0,
+		coldroomQty: (x.p.coldroomQty || 0) + x.add
+	}));
+
 	try {
-		const resp = await fetch(SCRIPT_URL, {
-			method: 'POST',
-			headers: {'Content-Type': 'text/plain'},
-			body: JSON.stringify({
-				action: 'writeProductionLog',
-				sheetId: NEW_SHEET_ID,
-				date: state.date,
-				rows: rows
+		const requests = [
+			fetch(SCRIPT_URL, {
+				method: 'POST',
+				headers: {'Content-Type': 'text/plain'},
+				body: JSON.stringify({
+					action: 'writeProductionLog',
+					sheetId: NEW_SHEET_ID,
+					date: state.date,
+					rows: rows
+				})
 			})
-		});
-		const data = await resp.json();
+		];
+		if (coldroomStockRows.length > 0) {
+			requests.push(fetch(SCRIPT_URL, {
+				method: 'POST',
+				headers: {'Content-Type': 'text/plain'},
+				body: JSON.stringify({
+					action: 'updateStockLevels',
+					sheetId: NEW_SHEET_ID,
+					rows: coldroomStockRows
+				})
+			}));
+		}
+		const responses = await Promise.all(requests);
+		const data = await responses[0].json();
 		if (data.status === 'ok') {
-			showToast(`✅ Saved ${data.saved} items`, 'success');
+			// Reflect the forwarded Coldroom addition in local state immediately, so the
+			// numbers are right if Alex flips back to the PLAN tab without reloading.
+			coldroomAdditions.forEach(x => { x.p.coldroomQty = (x.p.coldroomQty || 0) + x.add; });
+			showToast(`✅ Saved ${data.saved} items` + (coldroomStockRows.length > 0 ? ' + coldroom stock updated' : ''), 'success');
 		} else {
 			showToast('⚠️ ' + (data.message || 'Save failed'), 'error');
 		}
