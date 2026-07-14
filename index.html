@@ -1492,7 +1492,12 @@ function renderPlan() {
 }
 
 function buildTrolleyCardHTML(rt, coldroomBatches) {
-	if (!rt || rt.totalLoose <= 0) return '';
+	if (!rt || rt.totalLoose <= 0) {
+		return `
+			<div class="trolley-title">🥩 Russians Trolley (R6 / R5 / R4 / R3)</div>
+			<div class="trolley-row"><span>✅ Stock already covers today's need — nothing to cook</span></div>
+		`;
+	}
 	const coldroomNeedsInput = !(coldroomBatches > 0);
 	return `
 		<div class="trolley-title">🥩 Russians Trolley (R6 / R5 / R4 / R3)</div>
