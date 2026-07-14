@@ -2163,12 +2163,16 @@ function reconcileTrolleyAssignments(assignments, req) {
 			const label = a[key];
 			if (excessToRemove[label] > 0) {
 				a[key] = '';
+				a._stripped = true;
 				excessToRemove[label]--;
 			}
 		});
 	});
-	// A row that's now empty on both sides isn't doing anything — drop it.
-	result = result.filter(a => a.half1 || a.half2);
+	// Only drop a row if it's empty AND that emptiness came from stripping excess above —
+	// a row that started empty (e.g. just added via "+ Add Trolley", waiting for Alex to
+	// pick something) must never be silently removed just because it has nothing in it yet.
+	result = result.filter(a => a.half1 || a.half2 || !a._stripped);
+	result.forEach(a => { delete a._stripped; });
 
 	// TOP UP SHORTFALL: same as before — add slots for anything still missing.
 	const counted = {};
