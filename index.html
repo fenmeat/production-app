@@ -2284,6 +2284,18 @@ function buildTrolleyPlanCardHTML(req, assignments, polonyTrolleys) {
 function refreshTrolleyPlanCard() {
 	state.batchesRequired = calcBatchesRequired(state.products, state.russianTrolley, state.polonyPlan);
 	state.trolleyAssignments = reconcileTrolleyAssignments(state.trolleyAssignments, state.batchesRequired);
+	renderTrolleyPlanCardOnly();
+}
+
+// Re-renders the Trolley Plan card from whatever is CURRENTLY in state.trolleyAssignments,
+// without running reconciliation. Used whenever Alex is directly editing the trolley plan
+// himself (picking a dropdown value, adding/removing a row, resetting to auto-plan).
+// Reconciliation belongs only on the path that reacts to changes made ELSEWHERE (Stock/
+// Coldroom edits on other tabs) — never as a side effect of Alex's own edit here, otherwise
+// a manual selection that isn't (yet) reflected in the calculated requirement gets silently
+// wiped the instant it's made.
+function renderTrolleyPlanCardOnly() {
+	state.batchesRequired = calcBatchesRequired(state.products, state.russianTrolley, state.polonyPlan);
 	const tpEl = document.getElementById('trolleyPlanCard');
 	if (tpEl) tpEl.innerHTML = buildTrolleyPlanCardHTML(state.batchesRequired, state.trolleyAssignments, state.polonyTrolleys);
 }
@@ -2291,22 +2303,22 @@ function refreshTrolleyPlanCard() {
 function updateTrolleyHalf(rowIdx, halfKey, value) {
 	if (!state.trolleyAssignments[rowIdx]) return;
 	state.trolleyAssignments[rowIdx][halfKey] = value;
-	refreshTrolleyPlanCard();
+	renderTrolleyPlanCardOnly();
 }
 
 function addTrolleyRow() {
 	state.trolleyAssignments.push({ half1: '', half2: '' });
-	refreshTrolleyPlanCard();
+	renderTrolleyPlanCardOnly();
 }
 
 function removeTrolleyRow(rowIdx) {
 	state.trolleyAssignments.splice(rowIdx, 1);
-	refreshTrolleyPlanCard();
+	renderTrolleyPlanCardOnly();
 }
 
 function resetTrolleyPlan() {
 	state.trolleyAssignments = buildDefaultTrolleyAssignments(state.batchesRequired);
-	refreshTrolleyPlanCard();
+	renderTrolleyPlanCardOnly();
 }
 
 async function loadSavedTrolleyPlan() {
